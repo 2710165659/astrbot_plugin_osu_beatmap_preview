@@ -1,0 +1,14 @@
+{
+  "max_concurrency": {
+    "description": "最大并发预览任务数",
+    "type": "int",
+    "hint": "同时允许多少个谱面预览任务执行。建议 2~10，过大可能导致 CPU、内存或网络压力过高。",
+    "default": 10
+  },
+  "preview_timeout_seconds": {
+    "description": "单个谱面最大渲染时长，单位秒",
+    "type": "int",
+    "hint": "单个谱面预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
+    "default": 60
+  }
+}
