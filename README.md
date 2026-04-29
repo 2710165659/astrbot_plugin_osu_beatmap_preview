@@ -5,28 +5,10 @@
 ## 功能
 
 - 指令：`/预览 <bid>` or `/谱面预览 <bid>`
-- osu!standard：随机选取谱面中的五个时间段进行局部预览，只生成部分截图，不渲染完整谱面。
+- osu!standard：随机选取谱面中的四个时间段进行局部预览，不渲染完整谱面。
 - osu!taiko：生成完整谱面的纵向预览图，用于查看鼓点分布和整体节奏密度。暂不支持 10 分钟以上的长谱。
 - osu!catch：生成完整谱面的纵向预览图，用于查看水果、滑条路径和整体物件分布。暂不支持 10 分钟以上的长谱。
 - osu!mania：生成完整谱面的纵向预览图，用于查看各轨道物件分布和长条配置。暂不支持 10 分钟以上的长谱。
-
-## 项目结构
-
-```text
-├─ main.py
-├─ metadata.yaml
-├─ requirements.txt
-├─ README.md
-├─ update_core.sh
-├─ osu-beatmap-preview/
-│  ├─ SKILL.md
-│  ├─ assets/
-│  └─ scripts/
-│     ├─ run.py
-│     └─ beatmap_preview/
-└─ service/
-   └─ service_beatmap_preview.py
-```
 
 ## 安装
 
@@ -61,6 +43,6 @@ AstrBot/data/plugins/
 
 仓库里附带了一个手动更新脚本，会从上游仓库拉取最新的 `osu-beatmap-preview` 子目录并覆盖本地 core。
 
-```bash
-bash ./update_core.sh
+```bat
+.\update_core.bat
 ```
