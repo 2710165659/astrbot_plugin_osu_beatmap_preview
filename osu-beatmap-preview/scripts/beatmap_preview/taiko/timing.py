@@ -49,6 +49,7 @@ class TimingLine:
     show_label: bool
     is_kiai: bool
     is_kiai_start: bool
+    bpm: float | None = None
 
 
 class ScrollPositionMapper:
@@ -98,7 +99,7 @@ def build_redline_sections(timing_points: list[TimingPoint], chart_end_time: int
         if point.time > 0:
             break
         if point.uninherited:
-            beat_length = point.beat_length
+            beat_length = point.beat_length if point.beat_length >= 60 else 60_000 / 180
             meter = point.meter
 
     sections: list[RedlineSection] = []
@@ -116,7 +117,7 @@ def build_redline_sections(timing_points: list[TimingPoint], chart_end_time: int
                     meter=meter,
                 )
             )
-        beat_length = point.beat_length
+        beat_length = point.beat_length if point.beat_length >= 60 else 60_000 / 180
         meter = point.meter
         section_start = point_time
 
@@ -171,11 +172,22 @@ def build_timing_lines(
     mapper: ScrollPositionMapper,
     min_beat_line_spacing: int,
     kiai_sections: list[KiaiSection],
+    first_note_time: int = 0,
 ) -> list[TimingLine]:
     # 同一毫秒可能因为 timing section 边界被重复生成，最后用 dict 去重。
     line_by_time: dict[int, TimingLine] = {}
+    last_bpm: float | None = None
+    deferred_first_bpm: float | None = None
 
     for section in redline_sections:
+        bpm = 60_000.0 / section.beat_length
+        show_bpm = last_bpm is None or abs(bpm - last_bpm) > 0.01
+        last_bpm = bpm
+
+        if show_bpm and section.start_time == 0 and first_note_time > 0:
+            deferred_first_bpm = bpm
+            show_bpm = False
+
         beat_index = 0
         current_time = float(section.start_time)
         while current_time <= section.end_time + 0.001:
@@ -184,8 +196,9 @@ def build_timing_lines(
             # beat_spacing 用来控制普通拍线密度，避免 taiko 像 mania 那样过密。
             beat_spacing = mapper.position_at(min(next_time, section.end_time)) - mapper.position_at(current_time)
             is_measure = beat_index % section.meter == 0
+            is_first_beat = beat_index == 0
 
-            if is_measure or beat_spacing >= min_beat_line_spacing:
+            if is_measure or beat_spacing >= min_beat_line_spacing or (show_bpm and is_first_beat):
                 _merge_timing_line(
                     line_by_time=line_by_time,
                     time=rounded_time,
@@ -194,7 +207,10 @@ def build_timing_lines(
                     show_label=True,
                     is_kiai=False,
                     is_kiai_start=False,
+                    bpm=round(bpm) if show_bpm and is_first_beat else None,
                 )
+                if show_bpm and is_first_beat:
+                    show_bpm = False
 
             current_time = next_time
             beat_index += 1
@@ -209,6 +225,18 @@ def build_timing_lines(
             show_label=True,
             is_kiai=True,
             is_kiai_start=True,
+        )
+
+    if deferred_first_bpm is not None and first_note_time > 0:
+        _merge_timing_line(
+            line_by_time=line_by_time,
+            time=first_note_time,
+            position=mapper.position_at(first_note_time),
+            is_measure=False,
+            show_label=True,
+            is_kiai=False,
+            is_kiai_start=False,
+            bpm=round(deferred_first_bpm),
         )
 
     return _dedupe_display_labels(_apply_kiai_flags(line_by_time, kiai_sections))
@@ -286,6 +314,7 @@ def _merge_timing_line(
     show_label: bool,
     is_kiai: bool,
     is_kiai_start: bool,
+    bpm: float | None = None,
 ) -> None:
     existing = line_by_time.get(time)
     if existing is None:
@@ -296,6 +325,7 @@ def _merge_timing_line(
             show_label=show_label,
             is_kiai=is_kiai,
             is_kiai_start=is_kiai_start,
+            bpm=bpm,
         )
         return
 
@@ -306,6 +336,7 @@ def _merge_timing_line(
         show_label=existing.show_label or show_label,
         is_kiai=existing.is_kiai or is_kiai,
         is_kiai_start=existing.is_kiai_start or is_kiai_start,
+        bpm=existing.bpm if existing.bpm is not None else bpm,
     )
 
 
@@ -335,6 +366,7 @@ def _apply_kiai_flags(
                 show_label=line.show_label,
                 is_kiai=is_kiai,
                 is_kiai_start=line.is_kiai_start,
+                bpm=line.bpm,
             )
         )
 
@@ -357,7 +389,7 @@ def _dedupe_display_labels(lines: list[TimingLine]) -> list[TimingLine]:
             deduped.append(line)
             continue
 
-        if line.is_kiai_start and not previous.is_kiai_start:
+        if (line.is_kiai_start and not previous.is_kiai_start) or (line.bpm is not None and previous.bpm is None):
             deduped[-1] = TimingLine(
                 time=previous.time,
                 position=previous.position,
@@ -365,6 +397,7 @@ def _dedupe_display_labels(lines: list[TimingLine]) -> list[TimingLine]:
                 show_label=False,
                 is_kiai=previous.is_kiai,
                 is_kiai_start=previous.is_kiai_start,
+                bpm=None,
             )
             deduped.append(line)
             continue
@@ -377,6 +410,7 @@ def _dedupe_display_labels(lines: list[TimingLine]) -> list[TimingLine]:
                 show_label=False,
                 is_kiai=line.is_kiai,
                 is_kiai_start=line.is_kiai_start,
+                bpm=None,
             )
         )
 
@@ -391,10 +425,42 @@ def _apply_timing_state(
 ) -> tuple[float, int, float]:
     # 红线修改 BPM / 拍号；绿线修改 scroll speed。
     if point.uninherited:
-        return point.beat_length, point.meter, scroll_speed
-    if point.beat_length >= 0:
+        bl = point.beat_length if point.beat_length >= 60 else 60_000 / 180
+        return bl, point.meter, scroll_speed
+    if point.beat_length >= -0.001:
         return beat_length, meter, 1.0
     return beat_length, meter, -100 / point.beat_length
+
+
+@dataclass(frozen=True)
+class SvChange:
+    time: int
+    position: float
+    sv: float
+
+
+def build_sv_changes(
+    timing_points: list[TimingPoint],
+    chart_end_time: int,
+    mapper: ScrollPositionMapper,
+) -> list[SvChange]:
+    inherited = [
+        tp for tp in timing_points
+        if not tp.uninherited and tp.beat_length < -0.001 and 0 <= tp.time <= chart_end_time
+    ]
+    if not inherited:
+        return []
+
+    changes: list[SvChange] = []
+    prev_sv: float | None = None
+    for tp in inherited:
+        sv = -100.0 / tp.beat_length
+        if prev_sv is not None and abs(sv - prev_sv) <= 0.001:
+            continue
+        prev_sv = sv
+        changes.append(SvChange(time=int(tp.time), position=mapper.position_at(tp.time), sv=sv))
+
+    return changes
 
 
 def _pixels_per_ms(
