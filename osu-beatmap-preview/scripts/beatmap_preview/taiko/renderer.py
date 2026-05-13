@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ..errors import PreviewError
 from ..models import Beatmap, TaikoHitObject
 from .config import (
     BASE_ROW_WIDTH_0_TO_1_MIN,
@@ -68,6 +70,8 @@ HIT_SOUNDS_STRONG = 4
 DRUMROLL_FLAG = 2
 SWELL_FLAG = 8
 
+_render_cache: dict = {}
+
 
 @dataclass(frozen=True)
 class RenderLayout:
@@ -82,9 +86,14 @@ class RenderLayout:
     big_note_diameter: int
 
 
-def render_taiko_grid(beatmap: Beatmap, hit_objects: list[TaikoHitObject]) -> Image.Image:
+def render_taiko_grid(beatmap: Beatmap, output_path: Path) -> Path:
     """把 osu!taiko 谱面渲染为横向多行预览图。"""
+    hit_objects = [ho for ho in beatmap.hit_objects if isinstance(ho, TaikoHitObject)]
+    if not hit_objects:
+        raise PreviewError("taiko beatmap has no hit objects")
+
     skin = load_taiko_skin()
+    _render_cache.clear()
     slider_multiplier = float(beatmap.difficulty["SliderMultiplier"])
     chart_end_time = max(hit_object.end_time for hit_object in hit_objects)
     mapper = build_scroll_mapper(
@@ -117,7 +126,6 @@ def render_taiko_grid(beatmap: Beatmap, hit_objects: list[TaikoHitObject]) -> Im
     image = Image.new("RGBA", (layout.image_width, layout.image_height), IMAGE_BACKGROUND)
     draw = ImageDraw.Draw(image)
 
-    # 先画背景，再画小节线，最后画 note，保证层级与游戏观感一致。
     for row_index in range(layout.row_count):
         _draw_row_background(image, skin, layout, row_index)
 
@@ -129,7 +137,8 @@ def render_taiko_grid(beatmap: Beatmap, hit_objects: list[TaikoHitObject]) -> Im
     for hit_object in reversed(hit_objects):
         _draw_hit_object(image, hit_object, mapper, skin, layout)
 
-    return image
+    image.convert("RGB").save(output_path, optimize=True)
+    return output_path
 
 
 def _build_layout(
@@ -148,7 +157,7 @@ def _build_layout(
     right_panel_width = ROW_INNER_PADDING_X * 2 + max_row_width
     content_width = left_panel_width + right_panel_width
     image_width = PAGE_MARGIN_X * 2 + content_width
-    image_height = PAGE_MARGIN_Y * 2 + row_count * ROW_HEIGHT + (row_count - 1) * ROW_GAP
+    image_height = PAGE_MARGIN_Y * 2 + row_count * ROW_HEIGHT + row_count * ROW_GAP
     normal_note_diameter = round(ROW_HEIGHT * NORMAL_NOTE_SIZE_RATIO)
     big_note_diameter = round(normal_note_diameter * BIG_NOTE_SCALE)
     return RenderLayout(
@@ -193,7 +202,7 @@ def _resolve_row_width_bpm_multiplier(redline_sections: list[RedlineSection]) ->
 
 
 def _resolve_main_bpm(redline_sections: list[RedlineSection]) -> float:
-    # 用红线 section 的持续时长加权，取“主 BPM”作为宽度倍率依据。
+    # 用红线 section 的持续时长加权，取"主 BPM"作为宽度倍率依据。
     # 这样比直接取最高 BPM 更稳，不会因为短暂变速把整图拉得过宽。
     weighted_duration_by_bpm: dict[int, int] = {}
     for section in redline_sections:
@@ -216,15 +225,25 @@ def _draw_row_background(
     row_has_drum = DRAW_DRUM_EACH_ROW or row_index == 0
 
     if row_has_drum:
-        # 开启每行绘鼓时，左侧鼓和右侧轨道分别绘制。
-        left = _resize_sprite(skin.bar_left, (layout.left_panel_width, ROW_HEIGHT))
-        right = _resize_sprite(skin.bar_right, (layout.right_panel_width, ROW_HEIGHT))
+        left_key = (id(skin.bar_left), layout.left_panel_width, ROW_HEIGHT)
+        left = _render_cache.get(left_key)
+        if left is None:
+            left = _resize_sprite(skin.bar_left, (layout.left_panel_width, ROW_HEIGHT))
+            _render_cache[left_key] = left
+        right_key = (id(skin.bar_right), layout.right_panel_width, ROW_HEIGHT)
+        right = _render_cache.get(right_key)
+        if right is None:
+            right = _resize_sprite(skin.bar_right, (layout.right_panel_width, ROW_HEIGHT))
+            _render_cache[right_key] = right
         image.alpha_composite(left, (PAGE_MARGIN_X, row_top))
         image.alpha_composite(right, (PAGE_MARGIN_X + layout.left_panel_width, row_top))
         return
 
-    # 关闭后，后续行只保留轨道背景，并与图片最左侧对齐。
-    full_row = _resize_sprite(skin.bar_right, (layout.content_width, ROW_HEIGHT))
+    full_key = (id(skin.bar_right), layout.content_width, ROW_HEIGHT)
+    full_row = _render_cache.get(full_key)
+    if full_row is None:
+        full_row = _resize_sprite(skin.bar_right, (layout.content_width, ROW_HEIGHT))
+        _render_cache[full_key] = full_row
     image.alpha_composite(full_row, (PAGE_MARGIN_X, row_top))
 
 
@@ -426,13 +445,14 @@ def _draw_span_tail(
     height: int,
 ) -> None:
     tail = _build_roll_tail_sprite(color, height)
-    # osu! legacy 的 roll end 以左边缘与身体末端相接，不是把半圆中心对齐到结束时间。
     image.alpha_composite(tail, (join_x, round(center_y - height / 2)))
 
 
 def _build_roll_tail_sprite(color: tuple[int, int, int], height: int) -> Image.Image:
-    # 用程序绘制标准右半圆，避免 taiko-roll-end 贴图缩放后变成椭圆或上下错位。
-    # 左侧直径线由 roll-middle 身体衔接，不额外画黑色竖线。
+    key = (color, height)
+    cached = _render_cache.get(key)
+    if cached is not None:
+        return cached
     scale = 4
     scaled_height = height * scale
     scaled_width = max(1, math.ceil(height / 2) * scale)
@@ -451,7 +471,9 @@ def _build_roll_tail_sprite(color: tuple[int, int, int], height: int) -> Image.I
         ),
         fill=(*color, 255),
     )
-    return tail.resize((scaled_width // scale, height), Image.Resampling.LANCZOS)
+    tail = tail.resize((scaled_width // scale, height), Image.Resampling.LANCZOS)
+    _render_cache[key] = tail
+    return tail
 
 
 def _draw_note_sprite(
@@ -463,9 +485,18 @@ def _draw_note_sprite(
     center_x: int,
     center_y: int,
 ) -> None:
-    # taiko note 的主体来自底图 + overlay，颜色通过给底图重新着色实现。
-    tinted_base = _tint_sprite(base_sprite, color, diameter)
-    overlay = _resize_sprite(overlay_sprite, (diameter, diameter))
+    base_key = (id(base_sprite), color, diameter)
+    tinted_base = _render_cache.get(base_key)
+    if tinted_base is None:
+        tinted_base = _tint_sprite(base_sprite, color, diameter)
+        _render_cache[base_key] = tinted_base
+
+    overlay_key = (id(overlay_sprite), diameter)
+    overlay = _render_cache.get(overlay_key)
+    if overlay is None:
+        overlay = _resize_sprite(overlay_sprite, (diameter, diameter))
+        _render_cache[overlay_key] = overlay
+
     position = (round(center_x - diameter / 2), round(center_y - diameter / 2))
     image.alpha_composite(tinted_base, position)
     image.alpha_composite(overlay, position)
