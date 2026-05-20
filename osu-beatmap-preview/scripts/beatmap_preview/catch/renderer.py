@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..errors import PreviewError
 from ..models import Beatmap, CatchHitObject, TimingPoint
+from ..mods import ModSettings
 from .config import (
     BEAT_LINE,
     COLUMN_GAP,
@@ -33,12 +34,13 @@ from .config import (
     OBJECT_RADIUS,
     PAGE_MARGIN_X,
     PAGE_MARGIN_Y,
-    PIXELS_PER_MS,
     PLAYFIELD_BACKGROUND,
     PLAYFIELD_BORDER,
     PLAYFIELD_SIDE_PADDING,
     PLAYFIELD_WIDTH,
     RULER_TEXT,
+    STABLE_CATCHER_Y,
+    STABLE_FRUIT_START_Y,
     TIME_LABEL_FONT_SIZE,
     TIME_LABEL_NOTE_GAP,
     TOP_BUFFER,
@@ -47,6 +49,7 @@ from .config import (
 )
 from .objects import CatchRenderObject, build_catch_render_objects
 from .skin import CatchSkin, load_catch_skin
+from .slider_path import _build_slider_path_cached
 
 
 @dataclass(frozen=True)
@@ -79,43 +82,54 @@ class RenderLayout:
     visible_playfield_width: int
     bottom_area_height: int
     catcher_metrics: CatcherMetrics
+    pixels_per_ms: float
 
 
-def render_catch_grid(beatmap: Beatmap, output_path: Path) -> Path:
+def render_catch_grid(
+    beatmap: Beatmap,
+    output_path: Path,
+    mods: ModSettings | None = None,
+) -> Path:
     """把 osu!catch 谱面渲染为纵向多列预览图。"""
-    hit_objects = [ho for ho in beatmap.hit_objects if isinstance(ho, CatchHitObject)]
-    if not hit_objects:
-        raise PreviewError("catch beatmap has no hit objects")
+    _build_slider_path_cached.cache_clear()
+    try:
+        hit_objects = [ho for ho in beatmap.hit_objects if isinstance(ho, CatchHitObject)]
+        if not hit_objects:
+            raise PreviewError("catch beatmap has no hit objects")
 
-    skin = load_catch_skin()
-    render_cache: dict = {}
-    render_objects = build_catch_render_objects(beatmap, hit_objects, skin.combo_colors)
-    chart_end_time = max(1, max(hit_object.end_time for hit_object in hit_objects))
-    timing_lines = _build_timing_lines(beatmap.timing_points, chart_end_time)
-    layout = _build_layout(chart_end_time, float(beatmap.difficulty["CircleSize"]), skin)
-    font_regular = ImageFont.load_default(size=TIME_LABEL_FONT_SIZE)
+        skin = load_catch_skin()
+        render_cache: dict = {}
+        effective_difficulty = _effective_difficulty(beatmap, mods)
+        render_objects = build_catch_render_objects(beatmap, hit_objects, skin.combo_colors, mods=mods, difficulty=effective_difficulty)
+        chart_end_time = max(1, max(hit_object.end_time for hit_object in hit_objects))
+        timing_lines = _build_timing_lines(beatmap.timing_points, chart_end_time)
+        layout = _build_layout(chart_end_time, effective_difficulty["CircleSize"], effective_difficulty["ApproachRate"], skin)
+        font_regular = ImageFont.load_default(size=TIME_LABEL_FONT_SIZE)
 
-    image = Image.new("RGB", (layout.image_width, layout.image_height), IMAGE_BACKGROUND[:3])
-    draw = ImageDraw.Draw(image)
+        image = Image.new("RGB", (layout.image_width, layout.image_height), IMAGE_BACKGROUND[:3])
+        draw = ImageDraw.Draw(image)
 
-    for column_index in range(layout.column_count):
-        _draw_column_background(draw, layout, column_index)
-        if DRAW_CATCHER_EACH_COLUMN or column_index == 0:
-            _draw_catcher(image, skin, layout, column_index, render_cache)
+        for column_index in range(layout.column_count):
+            _draw_column_background(draw, layout, column_index)
+            if DRAW_CATCHER_EACH_COLUMN or column_index == 0:
+                _draw_catcher(image, skin, layout, column_index, render_cache)
 
-    for timing_line in timing_lines:
-        _draw_timing_line(draw, timing_line, layout, font_regular)
+        for timing_line in timing_lines:
+            _draw_timing_line(draw, timing_line, layout, font_regular)
 
-    for catch_object in sorted(render_objects, key=lambda item: (-item.start_time, _object_order(item.object_type))):
-        _draw_catch_object(image, skin, catch_object, layout, render_cache)
+        for catch_object in sorted(render_objects, key=lambda item: (-item.start_time, _object_order(item.object_type))):
+            _draw_catch_object(image, skin, catch_object, layout, render_cache)
 
-    image.save(output_path, optimize=True)
-    return output_path
+        image.save(output_path, optimize=True)
+        return output_path
+    finally:
+        _build_slider_path_cached.cache_clear()
 
 
 def _build_layout(
     beatmap_duration: int,
     circle_size: float,
+    approach_rate: float,
     skin: CatchSkin,
 ) -> RenderLayout:
     if beatmap_duration >= MAX_SUPPORTED_DURATION_MS:
@@ -125,10 +139,11 @@ def _build_layout(
     object_scale = _circle_scale(circle_size)
     side_padding = round(PLAYFIELD_SIDE_PADDING * playfield_scale)
     visible_playfield_width = COLUMN_WIDTH + side_padding * 2
-    total_chart_height = max(1, math.ceil(beatmap_duration * PIXELS_PER_MS))
+    pixels_per_ms = _pixels_per_ms_for_ar(approach_rate, playfield_scale)
+    total_chart_height = max(1, math.ceil(beatmap_duration * pixels_per_ms))
     column_count = _calculate_column_count(beatmap_duration, total_chart_height)
     time_per_column = max(1, math.ceil(beatmap_duration / column_count))
-    column_height = max(1, math.ceil(time_per_column * PIXELS_PER_MS))
+    column_height = max(1, math.ceil(time_per_column * pixels_per_ms))
     catcher_metrics = _build_catcher_metrics(circle_size, playfield_scale, skin)
     bottom_area_height = max(catcher_metrics.bottom_extent, OBJECT_BOTTOM_PADDING)
     total_column_height = TOP_BUFFER + column_height + bottom_area_height
@@ -151,7 +166,29 @@ def _build_layout(
         visible_playfield_width=visible_playfield_width,
         bottom_area_height=bottom_area_height,
         catcher_metrics=catcher_metrics,
+        pixels_per_ms=pixels_per_ms,
     )
+
+
+def _pixels_per_ms_for_ar(approach_rate: float, playfield_scale: float) -> float:
+    time_range = _catch_time_range(approach_rate)
+    # osu!catch 游玩内使用 stable 兼容的下落段：水果从 -100 落到判定线 340。
+    # 预览图使用同一段距离和 AR TimeRange 定标，EZ/HR 后纵向密度才会跟游戏内一致。
+    visible_fall_height = (STABLE_CATCHER_Y - STABLE_FRUIT_START_Y) * playfield_scale
+    return visible_fall_height / time_range
+
+
+def _catch_time_range(approach_rate: float) -> float:
+    return _difficulty_range(approach_rate, 1800.0, 1200.0, 450.0)
+
+
+def _difficulty_range(difficulty: float, minimum: float, middle: float, maximum: float) -> float:
+    scaled = (difficulty - 5.0) / 5.0
+    if difficulty > 5.0:
+        return middle + (maximum - middle) * scaled
+    if difficulty < 5.0:
+        return middle + (middle - minimum) * scaled
+    return middle
 
 
 def _calculate_column_count(beatmap_duration: int, total_chart_height: int) -> int:
@@ -217,7 +254,7 @@ def _draw_timing_line(
     local_time = timing_line.time - column_index * layout.time_per_column
     column_left = _column_left(column_index, layout)
     playfield_left = _playfield_left(column_index, layout)
-    y = _chart_bottom(layout, column_index) - round(local_time * PIXELS_PER_MS)
+    y = _chart_bottom(layout, column_index) - round(local_time * layout.pixels_per_ms)
 
     draw.line(
         (playfield_left, y, playfield_left + COLUMN_WIDTH - 1, y),
@@ -264,7 +301,7 @@ def _draw_catch_object(
     column_index = min(layout.column_count - 1, catch_object.start_time // layout.time_per_column)
     local_time = catch_object.start_time - column_index * layout.time_per_column
     center_x = round(_playfield_left(column_index, layout) + catch_object.x * layout.playfield_scale)
-    center_y = round(_chart_bottom(layout, column_index) - local_time * PIXELS_PER_MS)
+    center_y = round(_chart_bottom(layout, column_index) - local_time * layout.pixels_per_ms)
     # catch 物件显示尺寸需要乘上 CS 缩放。
     diameter = max(
         1,
@@ -448,3 +485,30 @@ def _object_order(object_type: str) -> int:
         "banana": 3,
     }
     return order[object_type]
+
+
+def _effective_difficulty(beatmap: Beatmap, mods: ModSettings | None) -> dict[str, float]:
+    difficulty = {
+        "CircleSize": float(beatmap.difficulty.get("CircleSize", "5")),
+        "OverallDifficulty": float(beatmap.difficulty.get("OverallDifficulty", "5")),
+        "ApproachRate": float(beatmap.difficulty.get("ApproachRate", beatmap.difficulty.get("OverallDifficulty", "5"))),
+        "HPDrainRate": float(beatmap.difficulty.get("HPDrainRate", "5")),
+        "SliderMultiplier": float(beatmap.difficulty.get("SliderMultiplier", "1.4")),
+        "SliderTickRate": float(beatmap.difficulty.get("SliderTickRate", "1")),
+    }
+    if mods is None:
+        return difficulty
+
+    if mods.easy:
+        difficulty["CircleSize"] *= 0.5
+        difficulty["ApproachRate"] *= 0.5
+        difficulty["HPDrainRate"] *= 0.5
+        difficulty["OverallDifficulty"] *= 0.5
+
+    if mods.hard_rock:
+        difficulty["HPDrainRate"] = min(difficulty["HPDrainRate"] * 1.4, 10.0)
+        difficulty["OverallDifficulty"] = min(difficulty["OverallDifficulty"] * 1.4, 10.0)
+        difficulty["CircleSize"] = min(difficulty["CircleSize"] * 1.3, 10.0)
+        difficulty["ApproachRate"] = min(difficulty["ApproachRate"] * 1.4, 10.0)
+
+    return difficulty

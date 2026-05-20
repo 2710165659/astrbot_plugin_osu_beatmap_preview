@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>osu! 谱面预览帮助</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 40px 48px;
+  max-width: 1080px;
+  line-height: 1.7;
+}
+h1 {
+  font-size: 28px;
+  color: #ff66ab;
+  text-align: center;
+  margin-bottom: 8px;
+}
+.subtitle {
+  font-size: 14px;
+  color: #aaa;
+  text-align: center;
+  margin-bottom: 32px;
+}
+h2 {
+  font-size: 18px;
+  color: #66ccff;
+  margin-top: 24px;
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #333;
+}
+code {
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  background: #2a2a4a;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+  color: #7fdbca;
+}
+.row {
+  display: flex;
+  gap: 24px;
+  margin: 8px 0;
+  align-items: flex-start;
+}
+.row > div { flex: 1; }
+.cmd-block {
+  background: #16213e;
+  border-left: 3px solid #ff66ab;
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 13px;
+  line-height: 2;
+}
+.cmd-block .label {
+  color: #ccc;
+  font-size: 12px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 8px;
+  font-size: 13px;
+}
+th {
+  background: #16213e;
+  color: #66ccff;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid #444;
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a4a;
+  vertical-align: top;
+}
+.cmd-table td:first-child { white-space: nowrap; }
+.cmd-desc { display: flex; flex-direction: column; gap: 6px; }
+.cmd-desc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  background: #16213e;
+  padding: 8px 16px;
+  border-radius: 4px;
+  border-left: 3px solid #66ccff;
+}
+.cmd-desc-item code:first-child {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+.cmd-desc-item span { color: #bbb; font-size: 13px; }
+.mod-row {
+  display: flex;
+  gap: 24px;
+  margin: 8px 0;
+}
+.mod-row > div { flex: 1; }
+.mod-row h3 {
+  font-size: 14px;
+  color: #ffcc66;
+  margin-bottom: 8px;
+}
+</style>
+</head>
+<body>
+
+<h1>osu! 谱面预览帮助</h1>
+<p class="subtitle">一个面向 AstrBot 的 osu! 谱面预览插件。支持 standard / taiko / catch / mania 四模式，支持转谱预览、mod、指定时间点、以及 PNG / GIF 输出。</p>
+
+<h2>命令格式</h2>
+<div class="row">
+  <div>
+    <div class="cmd-block">
+      /v[:模式] &lt;bid&gt;[+mod] [t=时间点]<br>
+      /vp[:模式] &lt;bid&gt;[+mod] [t=时间点]<br>
+      /vg[:模式] &lt;bid&gt;[+mod] [t=时间点]
+    </div>
+  </div>
+  <div>
+    <div class="cmd-block">
+      <span class="label">转谱：</span><code>/v:1 3684493</code><br>
+      <span class="label">mod：</span><code>/v 3684493+hd+hr</code><br>
+      <span class="label">时间：</span><code>/vg 3684493 t=12+24+48</code>
+    </div>
+  </div>
+</div>
+
+<h2>命令说明</h2>
+<div class="cmd-desc">
+  <div class="cmd-desc-item">
+    <code>/v</code>
+    <span>默认预览，输出格式自动决定。standard → GIF，taiko / catch / mania → PNG。别名：<code>/预览</code></span>
+  </div>
+  <div class="cmd-desc-item">
+    <code>/vp</code>
+    <span>强制 PNG，适合长图查看整体谱面分布</span>
+  </div>
+  <div class="cmd-desc-item">
+    <code>/vg</code>
+    <span>强制 GIF，适合局部动态观察读法和物件节奏，支持 <code>t=</code></span>
+  </div>
+</div>
+
+<h2>Mod 支持</h2>
+<div class="mod-row">
+  <div>
+    <h3>GIF</h3>
+    <table>
+    <tr><th>模式</th><th>支持内容</th></tr>
+    <tr><td>standard</td><td>EZ HR HD DA DT HT</td></tr>
+    <tr><td>taiko</td><td>EZ HR SW CS DT HT</td></tr>
+    <tr><td>catch</td><td>EZ HR DT HT</td></tr>
+    <tr><td>mania</td><td>1K-10K DS CS IN HO DT HT</td></tr>
+    </table>
+  </div>
+  <div>
+    <h3>PNG</h3>
+    <table>
+    <tr><th>模式</th><th>支持内容</th></tr>
+    <tr><td>standard</td><td>EZ HR HD DA</td></tr>
+    <tr><td>taiko</td><td>EZ HR SW</td></tr>
+    <tr><td>catch</td><td>EZ HR</td></tr>
+    <tr><td>mania</td><td>1K-10K DS IN HO</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>示例</h2>
+<div class="cmd-block">
+<span class="label">转谱为 taiko：</span><code>/v:1 3684493</code><br>
+<span class="label">转谱为 catch：</span><code>/v:2 3684493</code><br>
+<span class="label">转谱为 mania：</span><code>/v:3 3684493</code><br>
+<span class="label">HD+HR：</span><code>/v 3684493+hd+hr</code><br>
+<span class="label">DT 1.5x：</span><code>/v 3684493+dt1.5</code><br>
+<span class="label">指定时间点 GIF：</span><code>/vg 3684493 t=12+24+48</code><br>
+<span class="label">mania 4K 转谱：</span><code>/v:3 3684493+4k</code><br>
+<span class="label">综合：</span><code>/vg:3 3684493+4k+ds+in+dt1.2 t=10+30+50</code>
+</div>
+
+</body>
+</html>

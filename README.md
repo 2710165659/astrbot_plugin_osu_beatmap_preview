@@ -2,13 +2,9 @@
 
 把 `osu-beatmap-preview` core 封装成 AstrBot 插件，并把上游代码直接放在仓库内，方便部署和发布。
 
-## 功能
+## 功能如图
 
-- 指令：`/预览 <bid>` or `/谱面预览 <bid>`
-- osu!standard：随机选取谱面中的四个时间段进行局部预览，不渲染完整谱面。
-- osu!taiko：生成完整谱面的纵向预览图，用于查看鼓点分布和整体节奏密度。暂不支持 10 分钟以上的长谱。
-- osu!catch：生成完整谱面的纵向预览图，用于查看水果、滑条路径和整体物件分布。暂不支持 10 分钟以上的长谱。
-- osu!mania：生成完整谱面的纵向预览图，用于查看各轨道物件分布和长条配置。暂不支持 10 分钟以上的长谱。
+![help](help.png)
 
 ## 安装
 
@@ -38,6 +34,16 @@ AstrBot/data/plugins/
 ```
 
 3. 重启 AstrBot，或在 WebUI 中重载插件
+
+### 方式三：通过github链接安装
+
+在 AstrBot WebUI 中，进入插件管理页面，点击「通过 GitHub 链接安装」，输入以下地址：
+
+```
+https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
+```
+
+等待安装完成后重启 AstrBot 即可。
 
 ## 更新 core
 

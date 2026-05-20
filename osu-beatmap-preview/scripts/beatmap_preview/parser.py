@@ -21,9 +21,9 @@ def parse_beatmap(beatmap_path: Path) -> Beatmap:
         sections = _split_sections(content)
 
         # .osu 文件把 Metadata、Difficulty 等内容拆在不同 section 中；后续解析都基于这些分组。
-        metadata = _parse_key_value_section(sections, "Metadata")
+        metadata = _parse_key_value_section(sections, "Metadata") if "Metadata" in sections else _default_metadata()
         difficulty = _parse_key_value_section(sections, "Difficulty")
-        general = _parse_key_value_section(sections, "General")
+        general = _parse_key_value_section(sections, "General") if "General" in sections else {"Mode": "0"}
         general["FormatVersion"] = str(_parse_format_version(content))
         timing_points = _parse_timing_points(sections)
         break_periods = _parse_break_periods(sections)
@@ -95,6 +95,17 @@ def _parse_key_value_section(sections: dict[str, list[str]], section_name: str) 
     return values
 
 
+def _default_metadata() -> dict[str, str]:
+    return {
+        "Title": "Unknown",
+        "TitleUnicode": "",
+        "Artist": "Unknown",
+        "ArtistUnicode": "",
+        "Creator": "Unknown",
+        "Version": "Unknown",
+    }
+
+
 def _parse_timing_points(sections: dict[str, list[str]]) -> list[TimingPoint]:
     timing_points: list[TimingPoint] = []
     for line in sections["TimingPoints"]:
@@ -119,7 +130,8 @@ def _parse_timing_points(sections: dict[str, list[str]]) -> list[TimingPoint]:
             )
         )
 
-    return sorted(timing_points, key=lambda point: (point.time, point.beat_length))
+    # 同一时间点的红线 / 绿线顺序会影响后续 timing 计算，必须保留文件里的原始顺序。
+    return sorted(timing_points, key=lambda point: point.time)
 
 
 def _parse_break_periods(sections: dict[str, list[str]]) -> list[BreakPeriod]:
@@ -155,6 +167,7 @@ def _parse_standard_hit_objects(
         y = int(parts[1])
         start_time = int(parts[2])
         hit_type = int(parts[3])
+        hitsound = int(parts[4])
         end_time = _parse_object_end_time(parts, start_time, hit_type, difficulty, timing_points)
         new_combo = bool(hit_type & 4)
         combo_offset = (hit_type & 112) >> 4
@@ -162,6 +175,7 @@ def _parse_standard_hit_objects(
         slider_points: tuple[tuple[int, int], ...] = ()
         slider_repeats = 1
         slider_pixel_length = 0.0
+        slider_edge_hitsounds: tuple[int, ...] = ()
 
         if hit_type & 2:
             # Slider 专有字段从第 6 列开始：类型、控制点、重复次数和像素长度。
@@ -173,6 +187,8 @@ def _parse_standard_hit_objects(
             )
             slider_repeats = int(parts[6])
             slider_pixel_length = float(parts[7])
+            if len(parts) > 8 and parts[8]:
+                slider_edge_hitsounds = tuple(int(value) for value in parts[8].split("|") if value)
 
         hit_objects.append(
             StandardHitObject(
@@ -181,12 +197,14 @@ def _parse_standard_hit_objects(
                 start_time=start_time,
                 end_time=end_time,
                 hit_type=hit_type,
+                hitsound=hitsound,
                 new_combo=new_combo,
                 combo_offset=combo_offset,
                 slider_type=slider_type,
                 slider_points=slider_points,
                 slider_repeats=slider_repeats,
                 slider_pixel_length=slider_pixel_length,
+                slider_edge_hitsounds=slider_edge_hitsounds,
             )
         )
 

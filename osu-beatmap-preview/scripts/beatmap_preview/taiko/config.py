@@ -42,7 +42,7 @@ IMAGE_BACKGROUND = (0, 0, 0, 255)  # 整体背景色
 CENTRE_NOTE_COLOR = (235, 69, 44)  # don note 颜色
 RIM_NOTE_COLOR = (67, 142, 172)  # kat note 颜色
 ROLL_COLOR = (232, 198, 61)  # drumroll 颜色
-SWELL_COLOR = (255, 188, 64)  # swell 颜色
+SWELL_COLOR = (82, 204, 180)  # swell/转盘填充颜色
 MEASURE_LINE_COLOR = (255, 255, 255, 170)  # 小节线颜色
 BEAT_LINE_COLOR = (83, 83, 83)  # (220,220,220,96) 预混合到黑色行背景
 RULER_TEXT_COLOR = (232, 232, 232, 255)  # 时间标签颜色
@@ -52,3 +52,31 @@ NORMAL_NOTE_SIZE_RATIO = 0.475  # 普通 note 直径占行高的比例
 BIG_NOTE_SCALE = 1 / 0.65  # 大 note 相对普通 note 的放大倍率
 SPAN_BODY_HEIGHT_RATIO = 0.72  # drumroll 身体高度占头部直径比例
 SWELL_BODY_HEIGHT_RATIO = 0.8  # swell 身体高度占头部直径比例
+
+# GIF 相关配置
+GIF_SEGMENT_COUNT = 4  # GIF 横向段数
+GIF_DURATION_MS = 5000  # 每段播放时长(ms)
+GIF_FPS = 15  # GIF 帧率
+GIF_LOOP = 0  # GIF 循环次数，0 表示无限循环
+GIF_ROW_HEIGHT = 80  # GIF 单行高度
+GIF_ROW_GAP = 60  # GIF 行间距
+GIF_TIME_LABEL_FONT_SIZE = 20  # GIF 时间标签字号
+GIF_TIME_LABEL_NOTE_FONT_SIZE = 14  # GIF PreviewTime 备注字号
+GIF_TIME_LABEL_COLOR = (232, 232, 232, 255)  # GIF 普通时间标签颜色
+GIF_TIME_LABEL_NOTE_COLOR = (170, 170, 170, 255)  # GIF 普通备注标签颜色
+GIF_PREVIEW_TIME_LABEL_COLOR = (95, 221, 108, 255)  # GIF PreviewTime 标签颜色
+GIF_JUDGEMENT_LINE_COLOR = (255, 255, 255, 200)  # GIF 判定线颜色
+# GIF 横向几何按游戏内 TaikoPlayfield 的本地坐标等比缩小：
+# BASE_HEIGHT=200, INPUT_DRUM_WIDTH=180, hit_target_padding=76（见 TaikoPlayfield.cs）。
+# 之前直接拿 1080p 下的整段本地宽度 1109 来画 80px 高的行，只缩了高度没缩宽，
+# 会让同一帧里一行视觉上比游戏更长、同屏 note 数偏少。
+GIF_TAIKO_BASE_HEIGHT = 200.0
+GIF_REFERENCE_SCROLL_LENGTH = 1109.3333333333333
+GIF_REFERENCE_JUDGEMENT_X = 76.0
+GIF_JUDGEMENT_LINE_OFFSET = round(GIF_REFERENCE_JUDGEMENT_X * GIF_ROW_HEIGHT / GIF_TAIKO_BASE_HEIGHT)
+# osu! taiko 1080p 16:9 下的时间范围参数（来自 TaikoPlayfieldAdjustmentContainer.cs）
+GIF_STABLE_GAMEFIELD_HEIGHT = 480.0
+GIF_STABLE_HIT_LOCATION = 160.0
+GIF_VELOCITY_MULTIPLIER = 1.4
+GIF_ASPECT = 16.0 / 9.0  # 1080p 16:9
+GIF_SCROLL_LENGTH_PX = round(GIF_REFERENCE_SCROLL_LENGTH * GIF_ROW_HEIGHT / GIF_TAIKO_BASE_HEIGHT)

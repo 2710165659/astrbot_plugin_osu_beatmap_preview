@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..errors import PreviewError
 from ..models import Beatmap, TaikoHitObject
+from ..mods import ModSettings
 from .config import (
     BASE_ROW_WIDTH_0_TO_1_MIN,
     BASE_ROW_WIDTH_1_TO_2_MIN,
@@ -84,9 +85,16 @@ class RenderLayout:
     big_note_diameter: int
 
 
-def render_taiko_grid(beatmap: Beatmap, output_path: Path) -> Path:
+def render_taiko_grid(
+    beatmap: Beatmap,
+    output_path: Path,
+    mods: ModSettings | None = None,
+) -> Path:
     """把 osu!taiko 谱面渲染为横向多行预览图。"""
-    hit_objects = [ho for ho in beatmap.hit_objects if isinstance(ho, TaikoHitObject)]
+    hit_objects = _apply_taiko_object_mods(
+        [ho for ho in beatmap.hit_objects if isinstance(ho, TaikoHitObject)],
+        mods,
+    )
     if not hit_objects:
         raise PreviewError("taiko beatmap has no hit objects")
 
@@ -96,15 +104,16 @@ def render_taiko_grid(beatmap: Beatmap, output_path: Path) -> Path:
 
     skin = load_taiko_skin()
     render_cache: dict = {}
-    slider_multiplier = float(beatmap.difficulty["SliderMultiplier"])
+    slider_multiplier = _effective_slider_multiplier(beatmap, mods)
+    timing_points = _effective_timing_points(beatmap, mods)
     mapper = build_scroll_mapper(
-        timing_points=beatmap.timing_points,
+        timing_points=timing_points,
         chart_end_time=chart_end_time,
         slider_multiplier=slider_multiplier,
         spacing_bpm=SPACING_BPM,
     )
-    redline_sections = build_redline_sections(beatmap.timing_points, chart_end_time)
-    kiai_sections = build_kiai_sections(beatmap.timing_points, chart_end_time)
+    redline_sections = build_redline_sections(timing_points, chart_end_time)
+    kiai_sections = build_kiai_sections(timing_points, chart_end_time)
     layout = _build_layout(
         skin=skin,
         beatmap_duration=chart_end_time,
@@ -123,7 +132,7 @@ def render_taiko_grid(beatmap: Beatmap, output_path: Path) -> Path:
     font_note = ImageFont.load_default(size=TIME_LABEL_NOTE_FONT_SIZE)
     font_bpm = ImageFont.load_default(size=BPM_FONT_SIZE)
     font_sv = ImageFont.load_default(size=SV_TEXT_FONT_SIZE)
-    sv_changes = build_sv_changes(beatmap.timing_points, chart_end_time, mapper)
+    sv_changes = build_sv_changes(timing_points, chart_end_time, mapper)
     image = Image.new("RGB", (layout.image_width, layout.image_height), IMAGE_BACKGROUND[:3])
     draw = ImageDraw.Draw(image)
 
@@ -347,10 +356,32 @@ def _draw_hit_object(
     cache: dict,
 ) -> None:
     if hit_object.hit_type & SWELL_FLAG:
-        _draw_span_object(image, hit_object, mapper, skin, layout, cache, is_swell=True)
+        _draw_span_object(
+            image,
+            hit_object,
+            mapper,
+            skin,
+            layout,
+            cache,
+            is_swell=True,
+            span_color=SWELL_COLOR,
+            draw_spinner_warning=True,
+        )
         return
     if hit_object.hit_type & DRUMROLL_FLAG:
-        _draw_span_object(image, hit_object, mapper, skin, layout, cache, is_swell=False)
+        is_big_roll = bool(hit_object.hitsound & HIT_SOUNDS_STRONG)
+        # 大鼓滑条使用 swell 的外观；普通小鼓滑条保持 roll 外观不变。
+        _draw_span_object(
+            image,
+            hit_object,
+            mapper,
+            skin,
+            layout,
+            cache,
+            is_swell=is_big_roll,
+            span_color=ROLL_COLOR,
+            draw_spinner_warning=False,
+        )
         return
     _draw_circle_object(image, hit_object, mapper, skin, layout, cache)
 
@@ -387,6 +418,8 @@ def _draw_span_object(
     layout: RenderLayout,
     cache: dict,
     is_swell: bool,
+    span_color: tuple[int, int, int],
+    draw_spinner_warning: bool,
 ) -> None:
     absolute_start = mapper.position_at(hit_object.start_time)
     absolute_end = max(absolute_start, mapper.position_at(hit_object.end_time))
@@ -394,7 +427,6 @@ def _draw_span_object(
     row_start = int(absolute_start // layout.max_row_width)
     row_end = int(absolute_end // layout.max_row_width)
     head_diameter = layout.big_note_diameter if is_swell else layout.normal_note_diameter
-    span_color = SWELL_COLOR if is_swell else ROLL_COLOR
     body_height = round(head_diameter * (SWELL_BODY_HEIGHT_RATIO if is_swell else SPAN_BODY_HEIGHT_RATIO))
 
     for row_index in range(row_start, row_end + 1):
@@ -406,7 +438,17 @@ def _draw_span_object(
 
     head_center_x = round(_row_chart_left(layout, row_start) + (absolute_start - row_start * layout.max_row_width))
     tail_join_x = round(_row_chart_left(layout, row_end) + (absolute_end - row_end * layout.max_row_width))
-    _draw_span_head(image, skin, span_color, head_center_x, _row_center_y(row_start), head_diameter, cache, is_swell)
+    _draw_span_head(
+        image,
+        skin,
+        span_color,
+        head_center_x,
+        _row_center_y(row_start),
+        head_diameter,
+        cache,
+        is_swell,
+        draw_spinner_warning,
+    )
     _draw_span_tail(image, span_color, tail_join_x, _row_center_y(row_end), body_height, cache)
 
 
@@ -436,10 +478,30 @@ def _draw_span_head(
     diameter: int,
     cache: dict,
     is_swell: bool,
+    draw_spinner_warning: bool,
 ) -> None:
     base_sprite = skin.big_hit_circle if is_swell else skin.hit_circle
     overlay_sprite = skin.big_hit_circle_overlay if is_swell else skin.hit_circle_overlay
     _draw_note_sprite(image, base_sprite, overlay_sprite, color, diameter, center_x, center_y, cache)
+    if draw_spinner_warning:
+        _draw_spinner_warning(image, skin, diameter, center_x, center_y, cache)
+
+
+def _draw_spinner_warning(
+    image: Image.Image,
+    skin: TaikoSkin,
+    diameter: int,
+    center_x: int,
+    center_y: int,
+    cache: dict,
+) -> None:
+    warning_key = (id(skin.spinner_warning), diameter)
+    warning = cache.get(warning_key)
+    if warning is None:
+        warning = _resize_sprite(skin.spinner_warning, (diameter, diameter))
+        cache[warning_key] = warning
+    position = (round(center_x - diameter / 2), round(center_y - diameter / 2))
+    image.paste(warning, position, warning)
 
 
 def _draw_span_tail(
@@ -576,3 +638,56 @@ def _format_sv_label(sv: float) -> str:
     if sv == round(sv, 1):
         return f"{sv:.1f}x"
     return f"{sv:.2f}x"
+
+
+def _apply_taiko_object_mods(
+    hit_objects: list[TaikoHitObject],
+    mods: ModSettings | None,
+) -> list[TaikoHitObject]:
+    if mods is None or not mods.swap:
+        return hit_objects
+
+    # SW 只交换普通 hit 的红/蓝；roll 和 swell 在游戏内不是 Hit，不参与交换。
+    swapped: list[TaikoHitObject] = []
+    for hit_object in hit_objects:
+        if hit_object.hit_type & (DRUMROLL_FLAG | SWELL_FLAG):
+            swapped.append(hit_object)
+            continue
+
+        hitsound = hit_object.hitsound
+        is_rim = bool(hitsound & HIT_SOUNDS_RIM)
+        if is_rim:
+            hitsound &= ~HIT_SOUNDS_RIM
+            if hitsound == 0:
+                hitsound = 0
+        else:
+            hitsound |= 8
+
+        swapped.append(
+            TaikoHitObject(
+                start_time=hit_object.start_time,
+                end_time=hit_object.end_time,
+                hit_type=hit_object.hit_type,
+                hitsound=hitsound,
+            )
+        )
+    return swapped
+
+
+def _effective_slider_multiplier(beatmap: Beatmap, mods: ModSettings | None) -> float:
+    slider_multiplier = float(beatmap.difficulty["SliderMultiplier"])
+    if mods is None:
+        return slider_multiplier
+    # Taiko EZ/HR 会额外改 SliderMultiplier，视觉上就是整张图滚速变慢/变快。
+    if mods.easy:
+        slider_multiplier *= 0.8
+    if mods.hard_rock:
+        slider_multiplier *= 1.4 * 4 / 3
+    return slider_multiplier
+
+
+def _effective_timing_points(beatmap: Beatmap, mods: ModSettings | None):
+    if mods is not None and mods.cs_override:
+        # Constant Speed 在 drawable ruleset 层禁用 SV 可视化，这里用只保留红线来等价呈现。
+        return [point for point in beatmap.timing_points if point.uninherited]
+    return beatmap.timing_points
