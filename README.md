@@ -1,6 +1,6 @@
 # astrbot_plugin_osu_beatmap_preview
 
-把 `osu-beatmap-preview` core 封装成 AstrBot 插件，并把上游代码直接放在仓库内，方便部署和发布。
+把 Rust 版 `osu-beatmap-preview` core 封装成 AstrBot 插件，通过调用二进制文件渲染谱面预览图。
 
 ## 功能如图
 
@@ -47,8 +47,14 @@ https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
 
 ## 更新 core
 
-仓库里附带了一个手动更新脚本，会从上游仓库拉取最新的 `osu-beatmap-preview` 子目录并覆盖本地 core。
+运行以下脚本，自动从 [osu-beatmap-preview](https://github.com/2710165659/osu-beatmap-preview) 最新 release 下载四个平台的二进制文件到 `bin/` 目录：
 
 ```bat
 .\update_core.bat
 ```
+
+二进制文件按平台自动选择：
+- Windows: `bin/osu-beatmap-preview-windows-amd64.exe`
+- Linux: `bin/osu-beatmap-preview-linux-amd64`
+- macOS Intel: `bin/osu-beatmap-preview-macos-amd64`
+- macOS Apple Silicon: `bin/osu-beatmap-preview-macos-arm64`
