@@ -100,7 +100,7 @@ class BeatmapPreviewService:
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
-            raise Exception("谱面预览生成超时，请稍后再试")
+            raise Exception("预览生成超时，请稍后再试")
         except (FileNotFoundError, PermissionError) as exc:
             hint = ""
             if sys.platform != "win32":
@@ -113,9 +113,13 @@ class BeatmapPreviewService:
             )
 
         if result.returncode != 0:
-            # 尝试从 stderr 或 stdout 提取错误信息
-            error_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
-            raise Exception(f"谱面预览生成失败：{error_msg}")
+            # 尝试从 JSON 提取 msg，回退到 stderr/stdout
+            try:
+                err_payload = json.loads(result.stdout or result.stderr)
+                error_msg = err_payload.get("msg", "未知错误")
+            except json.JSONDecodeError:
+                error_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
+            raise Exception(error_msg)
 
         try:
             payload = json.loads(result.stdout)
@@ -123,7 +127,7 @@ class BeatmapPreviewService:
             raise Exception(f"核心返回了无效的 JSON：{result.stdout[:200]}")
 
         if payload.get("status") == "error":
-            raise Exception(f"谱面预览生成失败：{payload.get('msg', '未知错误')}")
+            raise Exception(payload.get("msg", "未知错误"))
 
         # 统一预览图路径
         preview_img = payload.get("preview-img", "")
