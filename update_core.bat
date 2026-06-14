@@ -1,51 +1,67 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 
-rem Manually update bundled core from upstream repo.
-set "REPO_URL=https://github.com/2710165659/osu-agent-skills.git"
-set "BRANCH=%~1"
-if not defined BRANCH set "BRANCH=main"
-set "TARGET_DIR=osu-beatmap-preview"
-set "TMP_DIR="
+rem Download latest osu-beatmap-preview Rust binaries from GitHub releases.
+rem Platforms: Windows amd64, Linux amd64, macOS amd64, macOS arm64.
+
+set "REPO=2710165659/osu-beatmap-preview"
+set "BIN_DIR=%~dp0bin"
+set "TAG="
 set "EXIT_CODE=0"
 
-call :make_temp_dir
+echo Fetching latest release tag from %REPO% ...
+powershell -NoProfile -Command ^
+  "$r = Invoke-RestMethod -Uri 'https://api.github.com/repos/%REPO%/releases/latest'; Write-Output $r.tag_name" > "%TEMP%\latest_tag.txt"
 if errorlevel 1 goto :fail
 
-echo Cloning %REPO_URL% ^(%BRANCH%^)...
-git clone --depth 1 --branch "%BRANCH%" --filter=blob:none --sparse "%REPO_URL%" "%TMP_DIR%"
+set /p TAG=<"%TEMP%\latest_tag.txt"
+if not defined TAG goto :fail
+echo Latest tag: %TAG%
+
+if not exist "%BIN_DIR%" mkdir "%BIN_DIR%"
 if errorlevel 1 goto :fail
 
-echo Fetching %TARGET_DIR% ...
-git -C "%TMP_DIR%" sparse-checkout set "%TARGET_DIR%"
+echo Downloading binaries into bin\ ...
+
+set "BASE_URL=https://github.com/%REPO%/releases/download/%TAG%"
+
+rem --- Windows amd64 ---
+echo   [1/4] windows-amd64 ...
+powershell -NoProfile -Command ^
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-windows-amd64.exe' -OutFile '%BIN_DIR%\osu-beatmap-preview-windows-amd64.exe'" -ErrorAction Stop
 if errorlevel 1 goto :fail
+echo     ok
 
-if not exist "%TMP_DIR%\%TARGET_DIR%" (
-    echo Failed to find fetched directory: %TARGET_DIR%
-    goto :fail
-)
-
-echo Replacing local %TARGET_DIR% ...
-if exist "%TARGET_DIR%" (
-    rmdir /s /q "%TARGET_DIR%"
-    if errorlevel 1 goto :fail
-)
-
-xcopy "%TMP_DIR%\%TARGET_DIR%" "%TARGET_DIR%\" /E /I /H /Y /Q >nul
+rem --- Linux amd64 ---
+echo   [2/4] linux-amd64 ...
+powershell -NoProfile -Command ^
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-linux-amd64' -OutFile '%BIN_DIR%\osu-beatmap-preview-linux-amd64'" -ErrorAction Stop
 if errorlevel 1 goto :fail
+echo     ok
 
-echo Core updated: %TARGET_DIR%
+rem --- macOS amd64 ---
+echo   [3/4] macos-amd64 ...
+powershell -NoProfile -Command ^
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-amd64' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-amd64'" -ErrorAction Stop
+if errorlevel 1 goto :fail
+echo     ok
+
+rem --- macOS arm64 ---
+echo   [4/4] macos-arm64 ...
+powershell -NoProfile -Command ^
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-arm64' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-arm64'" -ErrorAction Stop
+if errorlevel 1 goto :fail
+echo     ok
+
+echo.
+echo Core updated successfully to %TAG%.
+echo Binaries placed in: %BIN_DIR%
 goto :cleanup
-
-:make_temp_dir
-set "TMP_DIR=%TEMP%\update_core_%RANDOM%%RANDOM%"
-if exist "%TMP_DIR%" goto :make_temp_dir
-mkdir "%TMP_DIR%"
-exit /b %ERRORLEVEL%
 
 :fail
 set "EXIT_CODE=1"
+echo Update failed.
 
 :cleanup
-if defined TMP_DIR if exist "%TMP_DIR%" rmdir /s /q "%TMP_DIR%"
+if exist "%TEMP%\latest_tag.txt" del "%TEMP%\latest_tag.txt"
 endlocal & exit /b %EXIT_CODE%

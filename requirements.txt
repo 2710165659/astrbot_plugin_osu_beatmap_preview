@@ -1,1 +1,2 @@
-Pillow>=10.0.0
+# No Python dependencies required — the Rust binary handles all rendering.
+# Pillow was previously needed for the old Python core.

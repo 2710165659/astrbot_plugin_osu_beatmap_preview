@@ -59,8 +59,8 @@ TEXT_CONVERT_ALIASES = (
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
-    "Generate osu! beatmap preview images from beatmap id via osu-agent-skills.",
-    "0.1.0",
+    "Generate osu! beatmap preview images from beatmap id via osu-beatmap-preview Rust core.",
+    "0.2.0",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
