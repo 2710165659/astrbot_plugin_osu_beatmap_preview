@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import astrbot.api.message_components as Comp
@@ -102,6 +104,7 @@ class BeatmapPreviewPlugin(Star):
             yield self._reply_text(event, "当前谱面预览任务较多，请稍后再试")
             return
 
+        t0 = time.monotonic()
         try:
             async with self._preview_semaphore:
                 result = await asyncio.wait_for(
@@ -119,13 +122,17 @@ class BeatmapPreviewPlugin(Star):
             if not preview_img or not Path(preview_img).exists():
                 raise FileNotFoundError("生成的预览图文件不存在")
         except asyncio.TimeoutError:
+            logger.warning(f"[{bid}] 生成失败：超时（>{self.preview_timeout_seconds}s）")
             yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
             return
         except Exception as exc:
-            # 统一异常日志记录，方便排查问题
-            logger.exception("osu beatmap preview plugin failed while generating preview")
+            logger.error(f"[{bid}] 生成失败：{exc}", exc_info=True)
             yield self._reply_text(event, "谱面预览生成失败：" + str(exc))
             return
+
+        elapsed = time.monotonic() - t0
+        size_kb = os.path.getsize(preview_img) / 1024
+        logger.info(f"[{bid}] 生成成功，耗时 {elapsed:.1f} s，文件：{Path(preview_img).name}（{size_kb:.1f} KB）")
 
         chain = [
             Comp.Reply(id=event.message_obj.message_id),

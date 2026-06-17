@@ -97,6 +97,8 @@ class BeatmapPreviewService:
                 args,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',      # 强制使用 UTF-8 解码，避免不同平台默认编码差异
+                errors='replace',      # 遇到非法字节时替换为 �，避免崩溃
                 timeout=120,
             )
         except subprocess.TimeoutExpired:
@@ -114,17 +116,31 @@ class BeatmapPreviewService:
 
         if result.returncode != 0:
             # 尝试从 JSON 提取 msg，回退到 stderr/stdout
-            try:
-                err_payload = json.loads(result.stdout or result.stderr)
-                error_msg = err_payload.get("msg", "未知错误")
-            except json.JSONDecodeError:
-                error_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
+            raw = result.stdout or result.stderr
+            if raw is None:
+                error_msg = "未知错误"
+            else:
+                try:
+                    err_payload = json.loads(raw)
+                    error_msg = err_payload.get("msg", "未知错误")
+                except json.JSONDecodeError:
+                    error_msg = (result.stderr or "").strip() or (result.stdout or "").strip() or "未知错误"
             raise Exception(error_msg)
 
-        try:
-            payload = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            raise Exception(f"核心返回了无效的 JSON：{result.stdout[:200]}")
+        if not result.stdout:
+            # stdout 为空时尝试从 stderr 解析
+            if result.stderr:
+                try:
+                    payload = json.loads(result.stderr)
+                except json.JSONDecodeError:
+                    raise Exception(f"核心返回了无效的 JSON（stderr）：{result.stderr[:200]}")
+            else:
+                raise Exception("核心未返回任何输出")
+        else:
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                raise Exception(f"核心返回了无效的 JSON：{result.stdout[:200]}")
 
         if payload.get("status") == "error":
             raise Exception(payload.get("msg", "未知错误"))
