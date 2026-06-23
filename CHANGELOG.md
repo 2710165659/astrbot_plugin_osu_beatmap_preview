@@ -2,6 +2,14 @@
 
 ## [0.2.x]
 
+### [0.2.3] - 2026-06-23
+
+- 同步上游 osu-beatmap-preview [v1.0.3](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.0.3)。
+- 新增 taiko PNG `gap=` 参数支持，可自定义 BPM 间距（对应上游 `--bpm`）。
+- 新增 `--no-cache` 后缀支持，强制重新下载 .osu 文件并跳过输出缓存（对应上游 `--no-cache`）。
+- Standard 模式新增 TC (Traceable) mod 支持（GIF / PNG）。
+- 更新 help 文档。
+
 ### [0.2.2]
 
 - 修复windows环境因编码问题导致的渲染失败问题。

@@ -74,6 +74,8 @@ class BeatmapPreviewService:
         convert: str | None = None,
         mod_text: str | None = None,
         time_text: str | None = None,
+        gap_text: str | None = None,
+        no_cache: bool = False,
     ) -> dict[str, Any]:
         # 命令层只允许纯数字 bid。
         bid = bid.strip()
@@ -91,6 +93,10 @@ class BeatmapPreviewService:
             args += ["--mods", mod_text]
         if time_text:
             args += ["--time", time_text]
+        if gap_text:
+            args += ["--bpm", gap_text]
+        if no_cache:
+            args += ["--no-cache"]
 
         try:
             result = subprocess.run(
