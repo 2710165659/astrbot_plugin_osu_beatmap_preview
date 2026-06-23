@@ -2,7 +2,7 @@ name: astrbot_plugin_osu_beatmap_preview
 display_name: osu! 谱面预览
 author: xuan_yuan
 desc: 使用 Rust 版 osu-beatmap-preview 生成 osu! 四模式谱面预览图。
-version: 0.2.2
+version: 0.2.3
 repo: https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
 astrbot_version: ">=4.16,<5"
 support_platforms:

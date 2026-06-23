@@ -62,7 +62,7 @@ TEXT_CONVERT_ALIASES = (
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.0",
+    "0.2.3",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -84,7 +84,7 @@ class BeatmapPreviewPlugin(Star):
             return
 
         try:
-            bid, fmt, convert, mod_text, time_text = self._parse_request(
+            bid, fmt, convert, mod_text, time_text, gap_text, no_cache = self._parse_request(
                 command=matched.group("command"),
                 raw_tail=matched.group("tail"),
             )
@@ -115,6 +115,8 @@ class BeatmapPreviewPlugin(Star):
                         convert=convert,
                         mod_text=mod_text,
                         time_text=time_text,
+                        gap_text=gap_text,
+                        no_cache=no_cache,
                     ),
                     timeout=self.preview_timeout_seconds,
                 )
@@ -153,11 +155,11 @@ class BeatmapPreviewPlugin(Star):
         self,
         command: str,
         raw_tail: str,
-    ) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None, bool]:
         fmt = COMMAND_TO_FMT[command.lower()]
         tail = raw_tail.strip()
         if not tail:
-            return None, fmt, None, None, None
+            return None, fmt, None, None, None, None, False
 
         convert = None
         if tail.startswith((":", "：")):
@@ -170,8 +172,8 @@ class BeatmapPreviewPlugin(Star):
 
         bid = bid_match.group(0)
         suffix = tail[bid_match.end():]
-        mod_text, time_text = self._parse_suffix(suffix)
-        return bid, fmt, convert, mod_text, time_text
+        mod_text, time_text, gap_text, no_cache = self._parse_suffix(suffix)
+        return bid, fmt, convert, mod_text, time_text, gap_text, no_cache
 
     def _parse_convert_spec(self, raw_spec: str) -> tuple[str, str]:
         if not raw_spec:
@@ -190,18 +192,70 @@ class BeatmapPreviewPlugin(Star):
 
         raise ValueError("命令格式不正确")
 
-    def _parse_suffix(self, raw_suffix: str) -> tuple[str | None, str | None]:
+    def _parse_suffix(self, raw_suffix: str) -> tuple[str | None, str | None, str | None, bool]:
         normalized = re.sub(r"\s+", "", raw_suffix).lower()
         if not normalized:
-            return None, None
+            return None, None, None, False
 
+        # 末尾 --no-cache
+        no_cache = False
+        if normalized.endswith("--no-cache"):
+            no_cache = True
+            normalized = normalized[:-len("--no-cache")]
+            if not normalized:
+                return None, None, None, True
+
+        gap_match = re.search(r"(?:gap|g)=", normalized)
         time_match = re.search(r"-?(?:time|t)=", normalized)
-        mod_part = normalized
-        time_text = None
+
+        # mod_part 截止于第一个 = 参数之前
+        cut = len(normalized)
+        if gap_match is not None:
+            cut = min(cut, gap_match.start())
         if time_match is not None:
-            mod_part = normalized[:time_match.start()]
-            time_text = normalized[time_match.end():]
-            if not time_text:
+            cut = min(cut, time_match.start())
+
+        mod_part = normalized[:cut]
+        param_part = normalized[cut:]
+
+        # 依次解析 param_part 中的 gap=/g= 和 t=/time=
+        gap_text = None
+        time_text = None
+        pos = 0
+        while pos < len(param_part):
+            m_gap = re.match(r"(?:gap|g)=", param_part[pos:])
+            m_time = re.match(r"-?(?:time|t)=", param_part[pos:])
+            if m_gap:
+                pos += m_gap.end()
+                n_gap = re.search(r"(?:gap|g)=", param_part[pos:])
+                n_time = re.search(r"-?(?:time|t)=", param_part[pos:])
+                end = len(param_part)
+                if n_gap is not None:
+                    end = min(end, pos + n_gap.start())
+                if n_time is not None:
+                    end = min(end, pos + n_time.start())
+                gap_text = param_part[pos:end]
+                pos = end
+                if not gap_text:
+                    raise ValueError("命令格式不正确")
+                try:
+                    float(gap_text)
+                except ValueError:
+                    raise ValueError("命令格式不正确")
+            elif m_time:
+                pos += m_time.end()
+                n_gap = re.search(r"(?:gap|g)=", param_part[pos:])
+                n_time = re.search(r"-?(?:time|t)=", param_part[pos:])
+                end = len(param_part)
+                if n_gap is not None:
+                    end = min(end, pos + n_gap.start())
+                if n_time is not None:
+                    end = min(end, pos + n_time.start())
+                time_text = param_part[pos:end]
+                pos = end
+                if not time_text:
+                    raise ValueError("命令格式不正确")
+            else:
                 raise ValueError("命令格式不正确")
 
         mod_text = None
@@ -212,4 +266,4 @@ class BeatmapPreviewPlugin(Star):
             if not mod_text:
                 raise ValueError("命令格式不正确")
 
-        return mod_text, time_text
+        return mod_text, time_text, gap_text, no_cache

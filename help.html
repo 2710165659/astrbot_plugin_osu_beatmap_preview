@@ -128,16 +128,15 @@ td {
 <div class="row">
   <div>
     <div class="cmd-block">
-      /v[:模式] &lt;bid&gt;[+mod] [t=时间点]<br>
-      /vp[:模式] &lt;bid&gt;[+mod] [t=时间点]<br>
-      /vg[:模式] &lt;bid&gt;[+mod] [t=时间点]
-    </div>
+      /v[:模式] &lt;bid&gt;[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--no-cache]<br>
+      /vp[:模式] &lt;bid&gt;[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--no-cache]<br>
+      /vg[:模式] &lt;bid&gt;[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--no-cache]</div>
   </div>
   <div>
     <div class="cmd-block">
       <span class="label">转谱：</span><code>/v:1 3684493</code><br>
       <span class="label">mod：</span><code>/v 3684493+hd+hr</code><br>
-      <span class="label">时间：</span><code>/vg 3684493 t=12+24+48</code>
+      <span class="label">时间：</span><code>/vg 3684493 t=12+24+48</code><br>
     </div>
   </div>
 </div>
@@ -164,7 +163,7 @@ td {
     <h3>GIF</h3>
     <table>
     <tr><th>模式</th><th>支持内容</th></tr>
-    <tr><td>standard</td><td>EZ HR HD DA DT HT</td></tr>
+    <tr><td>standard</td><td>EZ HR HD DA DT HT TC</td></tr>
     <tr><td>taiko</td><td>EZ HR SW CS DT HT</td></tr>
     <tr><td>catch</td><td>EZ HR DT HT</td></tr>
     <tr><td>mania</td><td>1K-10K DS CS IN HO DT HT</td></tr>
@@ -174,7 +173,7 @@ td {
     <h3>PNG</h3>
     <table>
     <tr><th>模式</th><th>支持内容</th></tr>
-    <tr><td>standard</td><td>EZ HR HD DA</td></tr>
+    <tr><td>standard</td><td>EZ HR HD DA TC</td></tr>
     <tr><td>taiko</td><td>EZ HR SW</td></tr>
     <tr><td>catch</td><td>EZ HR</td></tr>
     <tr><td>mania</td><td>1K-10K DS IN HO</td></tr>
@@ -190,6 +189,8 @@ td {
 <span class="label">HD+HR：</span><code>/v 3684493+hd+hr</code><br>
 <span class="label">DT 1.5x：</span><code>/v 3684493+dt1.5</code><br>
 <span class="label">指定时间点 GIF：</span><code>/vg 3684493 t=12+24+48</code><br>
+<span class="label">taiko BPM 间距：</span><code>/vp:1 3684493 gap=180</code><br>
+<span class="label">强制重新下载：</span><code>/v 3684493 --no-cache</code><br>
 <span class="label">mania 4K 转谱：</span><code>/v:3 3684493+4k</code><br>
 <span class="label">综合：</span><code>/vg:3 3684493+4k+ds+in+dt1.2 t=10+30+50</code>
 </div>
