@@ -167,7 +167,7 @@
 
     .param {
       display: grid;
-      grid-template-columns: 170px 1fr;
+      grid-template-columns: 230px 1fr;
       gap: 20px;
       align-items: center;
       background: var(--card);
@@ -538,7 +538,7 @@
 
   <div class="hero">
     <h1>osu! Beatmap Preview</h1>
-    <div class="sub">osu! 谱面预览工具 · 支持 Standard / Taiko / Catch / Mania 四模式 GIF 与 PNG 渲染 · 支持 Mod</div>
+    <div class="sub">osu! 谱面预览工具 · 支持 Standard / Taiko / Catch / Mania 四模式 GIF、PNG 与带音频 MP4 渲染 · 支持 Mod</div>
     <div class="badges">
       <span class="badge">单可执行文件 · 无运行时依赖</span>
       <span class="badge">Windows / Linux / macOS</span>
@@ -548,7 +548,7 @@
 
   <!-- 1. 用法 -->
   <h2 class="section"><span class="num">1</span> 用法 <span class="bar"></span></h2>
-  <div class="usage-cmd"><span class="k">/v[:模式]</span> <span class="ph">&lt;BID&gt;</span><span class="opt">[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--no-cache]</span>
+  <div class="usage-cmd"><span class="k">/v[:模式]</span> <span class="ph">&lt;BID&gt;</span><span class="opt">[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--full] [--no-cache]</span>
   </div>
 
   <!-- 2. 参数 -->
@@ -568,12 +568,12 @@
         <code>+daar5cs7</code>。</div>
     </div>
     <div class="param">
-      <div class="name">/v  /  /vp  /  /vg</div>
-      <div class="desc">命令前缀：<code>/v</code> 自动决定输出格式（standard→GIF，其他→PNG）；<code>/vp</code> 强制 PNG；<code>/vg</code> 强制 GIF。</div>
+      <div class="name">命令前缀</div>
+      <div class="desc">命令前缀：<code>/v</code> 自动决定输出格式（standard→GIF，其他→PNG）；<code>/vp</code> 强制 PNG；<code>/vg</code> 强制 GIF；<code>/vgc</code> 生成无标签单屏 GIF；<code>/vgcl</code> 生成带标签单屏 GIF；<code>/vv</code> 生成带原始音频的 MP4 视频。</div>
     </div>
     <div class="param">
       <div class="name">t=&lt;时间点&gt;</div>
-      <div class="desc">GIF 时间点，最多四个，单位秒，用 <code>+</code> 连接，如 <code>t=10+25+60</code>。仅 GIF 可用。</div>
+      <div class="desc">时间单位为秒。普通 GIF 最多支持四个时间点；MP4、<code>/vgc</code> 和 <code>/vgcl</code> 需要两个时间点指定连续片段。</div>
     </div>
     <div class="param">
       <div class="name">gap=&lt;BPM&gt;</div>
@@ -585,8 +585,12 @@
     <div style="font-size:16px;font-weight:700;margin-bottom:10px;color:var(--blue2);">其他参数</div>
     <div class="params">
       <div class="param">
+        <div class="name">--full</div>
+        <div class="desc">仅用于 <code>/vv</code>，关闭默认的 30 秒预览并渲染完整谱面；不能与视频 <code>t=</code> 同时使用。</div>
+      </div>
+      <div class="param">
         <div class="name">--no-cache</div>
-        <div class="desc">放在命令末尾，跳过下载缓存与输出缓存，强制重新下载谱面并重新渲染。</div>
+        <div class="desc">跳过下载缓存与输出缓存，强制重新下载谱面并重新渲染，可与 <code>--full</code> 同时使用。</div>
       </div>
     </div>
   </div>
@@ -609,6 +613,21 @@
     <div class="example"><span class="tag">时间点</span>
       <div class="cmd"><span class="k">/vg</span> <span class="v">123456</span> <span class="v">t=10+25+60</span></div>
     </div>
+    <div class="example"><span class="tag">视频片段</span>
+      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span> <span class="v">t=30+60</span></div>
+    </div>
+    <div class="example"><span class="tag">默认视频</span>
+      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span></div>
+    </div>
+    <div class="example"><span class="tag">完整视频</span>
+      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span> <span class="v">--full</span></div>
+    </div>
+    <div class="example"><span class="tag">GIF切片</span>
+      <div class="cmd"><span class="k">/vgc</span> <span class="v">123456</span></div>
+    </div>
+    <div class="example"><span class="tag">GIF标签</span>
+      <div class="cmd"><span class="k">/vgcl</span> <span class="v">123456</span> <span class="v">t=-2+10</span></div>
+    </div>
     <div class="example"><span class="tag">复杂</span>
       <div class="cmd"><span class="k">/vg:3</span> <span class="v">123456</span><span class="v">+4k+ds+in+dt1.2</span> <span class="v">t=10+30+50</span></div>
     </div>
@@ -628,7 +647,7 @@
       </div>
       <div class="body">
         <div class="fmt-row gif">
-          <div class="fmt-label"><span class="dot"></span>GIF 支持</div>
+          <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
             <span class="chip accent">HD</span><span class="chip accent">DA</span>
@@ -657,7 +676,7 @@
       </div>
       <div class="body">
         <div class="fmt-row gif">
-          <div class="fmt-label"><span class="dot"></span>GIF 支持</div>
+          <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
             <span class="chip accent">SW</span><span class="chip accent">CS</span>
@@ -684,7 +703,7 @@
       </div>
       <div class="body">
         <div class="fmt-row gif">
-          <div class="fmt-label"><span class="dot"></span>GIF 支持</div>
+          <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
             <span class="chip accent">DT</span><span class="chip accent">HT</span>
@@ -710,7 +729,7 @@
       </div>
       <div class="body">
         <div class="fmt-row gif">
-          <div class="fmt-label"><span class="dot"></span>GIF 支持</div>
+          <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">CS</span><span class="chip accent">DT</span><span class="chip accent">HT</span>
             <span class="chip accent">1K–10K</span><span class="chip accent">DS</span><span
@@ -731,49 +750,6 @@
       </div>
     </div>
   </div>
-
-  <div style="margin-top:14px;font-size:14px;color:var(--dim);">
-    提示：<span style="color:var(--pink2)">粉色</span>为 GIF 支持，<span style="color:var(--blue2)">蓝色</span>为 PNG 支持。<code
-      style="background:#0a0d1c;padding:2px 7px;border-radius:5px;color:var(--yellow)">DT</code> / <code
-      style="background:#0a0d1c;padding:2px 7px;border-radius:5px;color:var(--yellow)">HT</code> / <code
-      style="background:#0a0d1c;padding:2px 7px;border-radius:5px;color:var(--yellow)">CS</code> 仅 GIF 支持。
-  </div>
-
-  <!-- 5. Mod 规则 -->
-  <h2 class="section"><span class="num">5</span> Mod 规则 <span class="bar"></span></h2>
-  <div class="rules">
-    <div class="rule">
-      <div class="pair">DT<span class="vs">/</span>HT</div>
-      <div class="txt">互斥。<b>DT</b> 默认 <code>1.5x</code>，范围 <code>1.01–2.00</code>；<b>HT</b> 默认 <code>0.75x</code>，范围
-        <code>0.50–0.99</code>。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">EZ<span class="vs">/</span>HR</div>
-      <div class="txt">互斥。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">TC<span class="vs">/</span>HD</div>
-      <div class="txt">互斥。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">1K<span class="vs">–</span>10K</div>
-      <div class="txt">互斥，仅 <code>--convert=mania</code> 时生效。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">IN<span class="vs">/</span>HO</div>
-      <div class="txt">互斥。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">DA<span class="vs">/</span>EZ<span class="vs">/</span>HR</div>
-      <div class="txt"><b>DA</b> 不能与 <code>EZ</code> 或 <code>HR</code> 同时使用，仅 Standard 可用。</div>
-    </div>
-    <div class="rule">
-      <div class="pair">DA 参数</div>
-      <div class="txt">格式 <code>da&lt;参数&gt;&lt;值&gt;</code>，如 <code>dacs5</code>、<code>daar9.5</code>，可叠加如
-        <code>dacs5ar9.5</code>。</div>
-    </div>
-  </div>
-  <div class="conflict-note">⚠ 冲突组合会直接报错，请按上述规则组合 Mod。</div>
 
   <div class="footer">
     osu! Beatmap Preview · MIT License &nbsp;·&nbsp; <span class="star">⭐</span> 觉得有用欢迎 Star

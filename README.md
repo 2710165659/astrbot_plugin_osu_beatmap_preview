@@ -1,10 +1,19 @@
 # astrbot_plugin_osu_beatmap_preview
 
-把 Rust 版 `osu-beatmap-preview` core 封装成 AstrBot 插件，通过调用二进制文件渲染谱面预览图。
+把 Rust 版 `osu-beatmap-preview` core 封装成 AstrBot 插件，通过调用二进制文件渲染谱面预览图和带原始音频的 MP4 视频。
 
 ## 功能如图
 
 ![help](help.png)
+
+视频使用 `/vv <BID>` 默认渲染 `PreviewTime` 附近约 30 秒。加上 `--full` 可渲染完整谱面；填写 `t=` 时用两个时间点指定片段的起点和终点，单位为秒，例如：
+
+```text
+/vv 123456 t=30+60
+/vv 123456 --full
+```
+
+`/vgc <BID>` 和 `/vgcl <BID>` 分别生成无时间标签和带时间标签的单屏连续 GIF，也可以用 `t=起点+终点` 指定范围。
 
 ## 安装
 

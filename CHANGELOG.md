@@ -2,6 +2,20 @@
 
 ## [0.2.x]
 
+### [0.2.5] - 2026-08-02
+
+- `/vv <BID>` 默认使用 `--preview-30s` 渲染 `PreviewTime` 附近约 30 秒；追加 `--full` 可渲染完整视频，`t=<起点>+<终点>` 仍可指定视频范围。
+- 新增 `/vgc <BID>` 无时间标签和 `/vgcl <BID>` 带时间标签的单屏连续 GIF 命令，对应核心的 `--gif-clip` 与 `--gif-clip-label`。
+- 默认视频和指定范围视频完成后只发送最终视频；完整视频保留入队提示。
+
+### [0.2.4] - 2026-07-31
+
+- 同步上游 osu-beatmap-preview [v1.0.6](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.0.6)。
+- 新增 `/vv <BID>` MP4 视频渲染，视频包含谱面原始音频；可用 `t=<起点>+<终点>` 指定两个时间点，省略时渲染整张谱面。
+- 新增视频渲染队列长度配置，默认最多容纳 3 个等待中或渲染中的视频任务；入队和队满时均会立即反馈。
+- Taiko PNG 的 `gap=` 参数改为调用上游 `--gap`，匹配上游参数重命名。
+- 更新帮助文档。
+
 ### [0.2.3] - 2026-06-23
 
 - 同步上游 osu-beatmap-preview [v1.0.3](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.0.3)。

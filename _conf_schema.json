@@ -1,14 +1,26 @@
 {
-  "max_concurrency": {
-    "description": "最大并发预览任务数",
+  "max_image_queue_length": {
+    "description": "图片渲染队列最大长度",
     "type": "int",
-    "hint": "同时允许多少个谱面预览任务执行。建议 2~10，过大可能导致 CPU、内存或网络压力过高。",
+    "hint": "图片队列中包含正在等待和正在渲染的任务。队列已满时拒绝新的 /v、/vp、/vg 请求。",
     "default": 10
   },
-  "preview_timeout_seconds": {
-    "description": "单个谱面最大渲染时长，单位秒",
+  "max_video_queue_length": {
+    "description": "视频渲染队列最大长度",
     "type": "int",
-    "hint": "单个谱面预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
+    "hint": "视频队列中包含正在等待和正在渲染的任务。队列已满时拒绝新的 /vv 请求。",
+    "default": 3
+  },
+  "image_timeout_seconds": {
+    "description": "单个图片最大渲染时长，单位秒",
+    "type": "int",
+    "hint": "单个图片预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
     "default": 60
+  },
+  "video_timeout_seconds": {
+    "description": "单个视频最大渲染时长，单位秒",
+    "type": "int",
+    "hint": "单个视频预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
+    "default": 120
   }
 }

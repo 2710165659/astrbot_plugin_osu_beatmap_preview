@@ -76,6 +76,10 @@ class BeatmapPreviewService:
         time_text: str | None = None,
         gap_text: str | None = None,
         no_cache: bool = False,
+        gif_clip: bool = False,
+        gif_clip_label: bool = False,
+        preview_30s: bool = False,
+        timeout: int = 120,
     ) -> dict[str, Any]:
         # 命令层只允许纯数字 bid。
         bid = bid.strip()
@@ -93,8 +97,14 @@ class BeatmapPreviewService:
             args += ["--mods", mod_text]
         if time_text:
             args += ["--time", time_text]
+        if gif_clip:
+            args += ["--gif-clip"]
+        if gif_clip_label:
+            args += ["--gif-clip-label"]
+        if preview_30s:
+            args += ["--preview-30s"]
         if gap_text:
-            args += ["--bpm", gap_text]
+            args += ["--gap", gap_text]
         if no_cache:
             args += ["--no-cache"]
 
@@ -105,10 +115,10 @@ class BeatmapPreviewService:
                 text=True,
                 encoding='utf-8',      # 强制使用 UTF-8 解码，避免不同平台默认编码差异
                 errors='replace',      # 遇到非法字节时替换为 �，避免崩溃
-                timeout=120,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            raise Exception("预览生成超时，请稍后再试")
+            raise TimeoutError("预览生成超时，请稍后再试")
         except (FileNotFoundError, PermissionError) as exc:
             hint = ""
             if sys.platform != "win32":

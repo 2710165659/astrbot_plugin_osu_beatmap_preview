@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import inspect
 import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import astrbot.api.message_components as Comp
@@ -21,7 +24,7 @@ if str(PLUGIN_ROOT) not in sys.path:
 from service.service_beatmap_preview import BeatmapPreviewService
 
 V_REQUEST_RE = re.compile(
-    r"^\s*/(?P<command>预览|v(?:p|g)?)(?P<tail>.*)\s*$",
+    r"^\s*/(?P<command>预览|vgcl|vgc|vv|vp|vg|v)(?P<tail>.*)\s*$",
     re.IGNORECASE,
 )
 
@@ -31,6 +34,9 @@ COMMAND_TO_FMT = {
     "v": None,
     "vp": "png",
     "vg": "gif",
+    "vgc": "gif",
+    "vgcl": "gif",
+    "vv": "mp4",
     "预览": None,
 }
 
@@ -58,11 +64,27 @@ TEXT_CONVERT_ALIASES = (
 )
 
 
+@dataclass(frozen=True)
+class PreviewRequest:
+    """解析后的聊天请求，避免在新增模式时扩展位置元组。"""
+
+    bid: str | None
+    fmt: str | None
+    convert: str | None
+    mod_text: str | None
+    time_text: str | None
+    gap_text: str | None
+    no_cache: bool
+    full_video: bool = False
+    gif_clip: bool = False
+    gif_clip_label: bool = False
+
+
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
-    "Generate osu! beatmap preview images from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.3",
+    "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
+    "0.2.5",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -70,13 +92,32 @@ class BeatmapPreviewPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
         self.preview_service = BeatmapPreviewService(plugin_root=PLUGIN_ROOT)
-        self.max_concurrency = config.get("max_concurrency", 10)
-        self.preview_timeout_seconds = config.get("preview_timeout_seconds", 60)
-        self._preview_semaphore = asyncio.Semaphore(self.max_concurrency)
+        legacy_timeout_seconds = config.get("preview_timeout_seconds", None)
+        image_timeout_seconds = config.get(
+            "image_timeout_seconds", legacy_timeout_seconds or 60
+        )
+        video_timeout_seconds = config.get(
+            "video_timeout_seconds", legacy_timeout_seconds or 120
+        )
+        legacy_image_queue_length = config.get("max_concurrency", 10)
+        self.image_timeout_seconds = max(1, int(image_timeout_seconds))
+        self.video_timeout_seconds = max(1, int(video_timeout_seconds))
+        self.max_image_queue_length = max(
+            1, int(config.get("max_image_queue_length", legacy_image_queue_length))
+        )
+        self.max_video_queue_length = max(
+            1, int(config.get("max_video_queue_length", 3))
+        )
+        self._image_render_semaphore = asyncio.Semaphore(1)
+        self._video_render_semaphore = asyncio.Semaphore(1)
+        self._image_queue_lock = asyncio.Lock()
+        self._image_queue_size = 0
+        self._video_queue_lock = asyncio.Lock()
+        self._video_queue_size = 0
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def preview_beatmap(self, event: AstrMessageEvent):
-        """统一处理 /v、/vp、/vg 指令"""
+        """统一处理 /v、/vp、/vg、/vgc、/vgcl、/vv 指令"""
 
         raw_text = event.message_obj.message_str
         matched = V_REQUEST_RE.match(raw_text)
@@ -84,7 +125,7 @@ class BeatmapPreviewPlugin(Star):
             return
 
         try:
-            bid, fmt, convert, mod_text, time_text, gap_text, no_cache = self._parse_request(
+            request = self._parse_request(
                 command=matched.group("command"),
                 raw_tail=matched.group("tail"),
             )
@@ -92,55 +133,114 @@ class BeatmapPreviewPlugin(Star):
             yield self._reply_text(event, str(exc))
             return
 
-        if bid is None:
+        if request.bid is None:
             yield event.chain_result([
                 Comp.Reply(id=event.message_obj.message_id),
                 Comp.Image.fromFileSystem(str(HELP_IMG)),
             ])
             return
 
-        # 如果当前执行中的预览任务已达到最大并发数，直接拒绝新请求，避免过载。
-        if self._preview_semaphore.locked():
-            yield self._reply_text(event, "当前谱面预览任务较多，请稍后再试")
-            return
+        is_video = request.fmt == "mp4"
+        queue_position = None
+        if is_video:
+            async with self._video_queue_lock:
+                if self._video_queue_size < self.max_video_queue_length:
+                    self._video_queue_size += 1
+                    queue_position = self._video_queue_size
 
-        t0 = time.monotonic()
+            if queue_position is None:
+                yield self._reply_text(event, "视频渲染队列已满，请稍后再试")
+                return
+        else:
+            async with self._image_queue_lock:
+                if self._image_queue_size < self.max_image_queue_length:
+                    self._image_queue_size += 1
+                    queue_position = self._image_queue_size
+
+            if queue_position is None:
+                yield self._reply_text(event, "图片渲染队列已满，请稍后再试")
+                return
+
         try:
-            async with self._preview_semaphore:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.preview_service.generate_from_bid,
-                        bid,
-                        fmt=fmt,
-                        convert=convert,
-                        mod_text=mod_text,
-                        time_text=time_text,
-                        gap_text=gap_text,
-                        no_cache=no_cache,
-                    ),
-                    timeout=self.preview_timeout_seconds,
+            if is_video and request.full_video:
+                yield self._reply_text(
+                    event,
+                    f"已加入视频渲染队列（{queue_position}/{self.max_video_queue_length}）",
                 )
-            preview_img = result["preview-img"]
-            if not preview_img or not Path(preview_img).exists():
-                raise FileNotFoundError("生成的预览图文件不存在")
-        except asyncio.TimeoutError:
-            logger.warning(f"[{bid}] 生成失败：超时（>{self.preview_timeout_seconds}s）")
-            yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
-            return
-        except Exception as exc:
-            logger.error(f"[{bid}] 生成失败：{exc}", exc_info=True)
-            yield self._reply_text(event, "谱面预览生成失败：" + str(exc))
-            return
 
-        elapsed = time.monotonic() - t0
-        size_kb = os.path.getsize(preview_img) / 1024
-        logger.info(f"[{bid}] 生成成功，耗时 {elapsed:.1f} s，文件：{Path(preview_img).name}（{size_kb:.1f} KB）")
+            t0 = time.monotonic()
+            render_semaphore = (
+                self._video_render_semaphore if is_video else self._image_render_semaphore
+            )
+            timeout_seconds = (
+                self.video_timeout_seconds if is_video else self.image_timeout_seconds
+            )
+            try:
+                async with render_semaphore:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self._generate_from_bid,
+                            request.bid,
+                            fmt=request.fmt,
+                            convert=request.convert,
+                            mod_text=request.mod_text,
+                            time_text=request.time_text,
+                            gap_text=request.gap_text,
+                            no_cache=request.no_cache,
+                            gif_clip=request.gif_clip,
+                            gif_clip_label=request.gif_clip_label,
+                            preview_30s=(
+                                is_video
+                                and request.time_text is None
+                                and not request.full_video
+                            ),
+                            timeout=timeout_seconds,
+                        ),
+                        timeout=timeout_seconds,
+                    )
+                preview_path = result["preview-img"]
+                if not preview_path or not Path(preview_path).exists():
+                    raise FileNotFoundError("生成的预览文件不存在")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{request.bid}] 生成失败：超时（>{timeout_seconds}s）")
+                yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
+                return
+            except TimeoutError:
+                logger.warning(f"[{request.bid}] 生成失败：超时（>{timeout_seconds}s）")
+                yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
+                return
+            except Exception as exc:
+                logger.error(f"[{request.bid}] 生成失败：{exc}", exc_info=True)
+                yield self._reply_text(event, "谱面预览生成失败：" + str(exc))
+                return
 
-        chain = [
-            Comp.Reply(id=event.message_obj.message_id),
-            Comp.Image.fromFileSystem(preview_img),
-        ]
-        yield event.chain_result(chain)
+            elapsed = time.monotonic() - t0
+            size_kb = os.path.getsize(preview_path) / 1024
+            logger.info(f"[{request.bid}] 生成成功，耗时 {elapsed:.1f} s，文件：{Path(preview_path).name}（{size_kb:.1f} KB）")
+
+            if is_video:
+                video_data = await asyncio.to_thread(
+                    self._encode_video_base64,
+                    preview_path,
+                )
+                preview_component = Comp.Video(file=f"base64://{video_data}")
+            else:
+                preview_component = Comp.Image.fromFileSystem(preview_path)
+
+            if is_video:
+                yield event.chain_result([preview_component])
+            else:
+                yield event.chain_result([
+                    Comp.Reply(id=event.message_obj.message_id),
+                    preview_component,
+                ])
+        finally:
+            if queue_position is not None and is_video:
+                async with self._video_queue_lock:
+                    self._video_queue_size -= 1
+            elif queue_position is not None:
+                async with self._image_queue_lock:
+                    self._image_queue_size -= 1
 
     @staticmethod
     def _reply_text(event: AstrMessageEvent, text: str):
@@ -151,15 +251,71 @@ class BeatmapPreviewPlugin(Star):
             ]
         )
 
+    @staticmethod
+    def _encode_video_base64(path: str) -> str:
+        return base64.b64encode(Path(path).read_bytes()).decode("ascii")
+
+    def _generate_from_bid(
+        self,
+        bid: str,
+        *,
+        fmt: str | None,
+        convert: str | None,
+        mod_text: str | None,
+        time_text: str | None,
+        gap_text: str | None,
+        no_cache: bool,
+        gif_clip: bool,
+        gif_clip_label: bool,
+        preview_30s: bool,
+        timeout: int,
+    ):
+        kwargs = {
+            "fmt": fmt,
+            "convert": convert,
+            "mod_text": mod_text,
+            "time_text": time_text,
+            "gap_text": gap_text,
+            "no_cache": no_cache,
+        }
+        signature = inspect.signature(self.preview_service.generate_from_bid)
+        parameters = signature.parameters
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        for name, value in (
+            ("gif_clip", gif_clip),
+            ("gif_clip_label", gif_clip_label),
+            ("preview_30s", preview_30s),
+            ("timeout", timeout),
+        ):
+            if name in parameters or accepts_kwargs:
+                kwargs[name] = value
+        return self.preview_service.generate_from_bid(bid, **kwargs)
+
     def _parse_request(
         self,
         command: str,
         raw_tail: str,
-    ) -> tuple[str | None, str | None, str | None, str | None, str | None, str | None, bool]:
-        fmt = COMMAND_TO_FMT[command.lower()]
+    ) -> PreviewRequest:
+        command_key = command.lower()
+        fmt = COMMAND_TO_FMT[command_key]
+        gif_clip = command_key == "vgc"
+        gif_clip_label = command_key == "vgcl"
         tail = raw_tail.strip()
         if not tail:
-            return None, fmt, None, None, None, None, False
+            return PreviewRequest(
+                None,
+                fmt,
+                None,
+                None,
+                None,
+                None,
+                False,
+                gif_clip=gif_clip,
+                gif_clip_label=gif_clip_label,
+            )
 
         convert = None
         if tail.startswith((":", "：")):
@@ -172,8 +328,31 @@ class BeatmapPreviewPlugin(Star):
 
         bid = bid_match.group(0)
         suffix = tail[bid_match.end():]
-        mod_text, time_text, gap_text, no_cache = self._parse_suffix(suffix)
-        return bid, fmt, convert, mod_text, time_text, gap_text, no_cache
+        mod_text, time_text, gap_text, no_cache, full_video = self._parse_suffix(suffix)
+        if full_video and fmt != "mp4":
+            raise ValueError("--full 仅适用于 /vv 视频命令")
+        if full_video and time_text is not None:
+            raise ValueError("--full 不能与视频时间范围同时使用")
+        if fmt == "mp4" and time_text is not None:
+            time_points = [part for part in time_text.split("+") if part]
+            if len(time_points) != 2:
+                raise ValueError("视频时间范围需要两个时间点，例如：t=30+60")
+        if (gif_clip or gif_clip_label) and time_text is not None:
+            time_points = [part for part in time_text.split("+") if part]
+            if len(time_points) != 2:
+                raise ValueError("GIF 单屏模式的时间范围需要两个时间点，例如：t=30+40")
+        return PreviewRequest(
+            bid,
+            fmt,
+            convert,
+            mod_text,
+            time_text,
+            gap_text,
+            no_cache,
+            full_video=full_video,
+            gif_clip=gif_clip,
+            gif_clip_label=gif_clip_label,
+        )
 
     def _parse_convert_spec(self, raw_spec: str) -> tuple[str, str]:
         if not raw_spec:
@@ -192,18 +371,25 @@ class BeatmapPreviewPlugin(Star):
 
         raise ValueError("命令格式不正确")
 
-    def _parse_suffix(self, raw_suffix: str) -> tuple[str | None, str | None, str | None, bool]:
+    def _parse_suffix(
+        self,
+        raw_suffix: str,
+    ) -> tuple[str | None, str | None, str | None, bool, bool]:
         normalized = re.sub(r"\s+", "", raw_suffix).lower()
         if not normalized:
-            return None, None, None, False
+            return None, None, None, False, False
 
-        # 末尾 --no-cache
+        # 独立解析尾部开关，允许 --full 与 --no-cache 以任意顺序组合。
         no_cache = False
-        if normalized.endswith("--no-cache"):
+        full_video = False
+        if "--no-cache" in normalized:
             no_cache = True
-            normalized = normalized[:-len("--no-cache")]
-            if not normalized:
-                return None, None, None, True
+            normalized = normalized.replace("--no-cache", "")
+        if "--full" in normalized:
+            full_video = True
+            normalized = normalized.replace("--full", "")
+        if not normalized:
+            return None, None, None, no_cache, full_video
 
         gap_match = re.search(r"(?:gap|g)=", normalized)
         time_match = re.search(r"-?(?:time|t)=", normalized)
@@ -266,4 +452,4 @@ class BeatmapPreviewPlugin(Star):
             if not mod_text:
                 raise ValueError("命令格式不正确")
 
-        return mod_text, time_text, gap_text, no_cache
+        return mod_text, time_text, gap_text, no_cache, full_video
