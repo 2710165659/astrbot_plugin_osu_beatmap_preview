@@ -1,0 +1,23 @@
+layout:
+  standard:
+    gif:
+      ROW_COUNT: 1
+      IMAGES_PER_ROW: 1
+      SHOW_TIME_LABEL: false
+      DURATION_MS: 10000
+  taiko:
+    gif:
+      ROW_COUNT: 1
+      SHOW_TIME_LABEL: false
+      DURATION_MS: 10000.0
+  catch:
+    gif:
+      ROW_COUNT: 1
+      IMAGES_PER_ROW: 1
+      SHOW_TIME_LABEL: false
+      DURATION_MS: 10000.0
+  mania:
+    gif:
+      IMAGES_PER_ROW: 1
+      SHOW_TIME_LABEL: false
+      DURATION_MS: 10000

@@ -2,6 +2,15 @@
 
 ## [0.2.x]
 
+### [0.2.6] - 2026-08-30
+
+- 同步上游 osu-beatmap-preview [v1.0.8](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.0.8)，适配新的 `--mod`、`--time-points`、`--duration-time` 和 `--config` 命令行接口。
+- 保留现有聊天命令语法：复合 Mod 和多时间点会转换为可重复的上游参数，`/vv` 时间范围会转换为起点与时长。
+- Taiko 和 Mania 的 GIF/MP4 默认使用 30 FPS。
+- `/vgc` 改为通过配置生成四模式无时间标签的单屏 GIF；`/vgcl` 在同一布局上开启时间标签。
+- Taiko PNG 的 `gap=` 保持兼容，改为动态覆盖 `layout.taiko.png.SPACING_PER_BPM`。
+- 核心 PNG/GIF/MP4 默认超时设为 55/55/115 秒，比 Python 外层默认的图片 60 秒和视频 120 秒各少 5 秒。
+
 ### [0.2.5] - 2026-08-02
 
 - `/vv <BID>` 默认使用 `--preview-30s` 渲染 `PreviewTime` 附近约 30 秒；追加 `--full` 可渲染完整视频，`t=<起点>+<终点>` 仍可指定视频范围。

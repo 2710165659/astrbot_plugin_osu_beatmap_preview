@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import inspect
+import math
 import os
 import re
 import sys
@@ -71,20 +71,21 @@ class PreviewRequest:
     bid: str | None
     fmt: str | None
     convert: str | None
-    mod_text: str | None
-    time_text: str | None
-    gap_text: str | None
+    mods: tuple[str, ...]
+    time_points: tuple[str, ...]
+    duration_time: float | None
+    taiko_gap: float | None
     no_cache: bool
     full_video: bool = False
-    gif_clip: bool = False
-    gif_clip_label: bool = False
+    config_profile: str = "default"
+    gif_duration_ms: int | None = None
 
 
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.5",
+    "0.2.6",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -179,21 +180,17 @@ class BeatmapPreviewPlugin(Star):
                 async with render_semaphore:
                     result = await asyncio.wait_for(
                         asyncio.to_thread(
-                            self._generate_from_bid,
+                            self.preview_service.generate_from_bid,
                             request.bid,
                             fmt=request.fmt,
                             convert=request.convert,
-                            mod_text=request.mod_text,
-                            time_text=request.time_text,
-                            gap_text=request.gap_text,
+                            mods=request.mods,
+                            time_points=request.time_points,
+                            duration_time=request.duration_time,
                             no_cache=request.no_cache,
-                            gif_clip=request.gif_clip,
-                            gif_clip_label=request.gif_clip_label,
-                            preview_30s=(
-                                is_video
-                                and request.time_text is None
-                                and not request.full_video
-                            ),
+                            config_profile=request.config_profile,
+                            taiko_gap=request.taiko_gap,
+                            gif_duration_ms=request.gif_duration_ms,
                             timeout=timeout_seconds,
                         ),
                         timeout=timeout_seconds,
@@ -255,45 +252,6 @@ class BeatmapPreviewPlugin(Star):
     def _encode_video_base64(path: str) -> str:
         return base64.b64encode(Path(path).read_bytes()).decode("ascii")
 
-    def _generate_from_bid(
-        self,
-        bid: str,
-        *,
-        fmt: str | None,
-        convert: str | None,
-        mod_text: str | None,
-        time_text: str | None,
-        gap_text: str | None,
-        no_cache: bool,
-        gif_clip: bool,
-        gif_clip_label: bool,
-        preview_30s: bool,
-        timeout: int,
-    ):
-        kwargs = {
-            "fmt": fmt,
-            "convert": convert,
-            "mod_text": mod_text,
-            "time_text": time_text,
-            "gap_text": gap_text,
-            "no_cache": no_cache,
-        }
-        signature = inspect.signature(self.preview_service.generate_from_bid)
-        parameters = signature.parameters
-        accepts_kwargs = any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD
-            for parameter in parameters.values()
-        )
-        for name, value in (
-            ("gif_clip", gif_clip),
-            ("gif_clip_label", gif_clip_label),
-            ("preview_30s", preview_30s),
-            ("timeout", timeout),
-        ):
-            if name in parameters or accepts_kwargs:
-                kwargs[name] = value
-        return self.preview_service.generate_from_bid(bid, **kwargs)
-
     def _parse_request(
         self,
         command: str,
@@ -301,20 +259,19 @@ class BeatmapPreviewPlugin(Star):
     ) -> PreviewRequest:
         command_key = command.lower()
         fmt = COMMAND_TO_FMT[command_key]
-        gif_clip = command_key == "vgc"
-        gif_clip_label = command_key == "vgcl"
+        config_profile = command_key if command_key in {"vgc", "vgcl"} else "default"
         tail = raw_tail.strip()
         if not tail:
             return PreviewRequest(
-                None,
-                fmt,
-                None,
-                None,
-                None,
-                None,
-                False,
-                gif_clip=gif_clip,
-                gif_clip_label=gif_clip_label,
+                bid=None,
+                fmt=fmt,
+                convert=None,
+                mods=(),
+                time_points=(),
+                duration_time=None,
+                taiko_gap=None,
+                no_cache=False,
+                config_profile=config_profile,
             )
 
         convert = None
@@ -333,26 +290,96 @@ class BeatmapPreviewPlugin(Star):
             raise ValueError("--full 仅适用于 /vv 视频命令")
         if full_video and time_text is not None:
             raise ValueError("--full 不能与视频时间范围同时使用")
-        if fmt == "mp4" and time_text is not None:
-            time_points = [part for part in time_text.split("+") if part]
-            if len(time_points) != 2:
-                raise ValueError("视频时间范围需要两个时间点，例如：t=30+60")
-        if (gif_clip or gif_clip_label) and time_text is not None:
-            time_points = [part for part in time_text.split("+") if part]
-            if len(time_points) != 2:
-                raise ValueError("GIF 单屏模式的时间范围需要两个时间点，例如：t=30+40")
+
+        mods = self._parse_mods(mod_text)
+        taiko_gap = self._parse_gap(gap_text)
+        time_points: tuple[str, ...] = ()
+        duration_time = None
+        gif_duration_ms = None
+        if time_text is not None:
+            parsed_times = self._parse_time_points(time_text)
+            if fmt == "mp4":
+                start, duration_time = self._parse_time_range(
+                    parsed_times,
+                    "视频时间范围需要两个时间点，例如：t=30+60",
+                )
+                time_points = (start,)
+            elif config_profile in {"vgc", "vgcl"}:
+                start, duration = self._parse_time_range(
+                    parsed_times,
+                    "GIF 单屏模式的时间范围需要两个时间点，例如：t=30+40",
+                )
+                time_points = (start,)
+                gif_duration_ms = round(duration * 1000)
+                if gif_duration_ms <= 0:
+                    raise ValueError("GIF 单屏模式的时间范围至少需要 0.001 秒")
+            else:
+                time_points = tuple(parsed_times)
+        elif fmt == "mp4" and not full_video:
+            time_points = ("preview",)
+            duration_time = 30.0
+
         return PreviewRequest(
-            bid,
-            fmt,
-            convert,
-            mod_text,
-            time_text,
-            gap_text,
-            no_cache,
+            bid=bid,
+            fmt=fmt,
+            convert=convert,
+            mods=mods,
+            time_points=time_points,
+            duration_time=duration_time,
+            taiko_gap=taiko_gap,
+            no_cache=no_cache,
             full_video=full_video,
-            gif_clip=gif_clip,
-            gif_clip_label=gif_clip_label,
+            config_profile=config_profile,
+            gif_duration_ms=gif_duration_ms,
         )
+
+    @staticmethod
+    def _parse_mods(mod_text: str | None) -> tuple[str, ...]:
+        if mod_text is None:
+            return ()
+        mods = tuple(mod_text.split("+"))
+        if any(not mod for mod in mods):
+            raise ValueError("命令格式不正确")
+        return mods
+
+    @staticmethod
+    def _parse_gap(gap_text: str | None) -> float | None:
+        if gap_text is None:
+            return None
+        try:
+            gap = float(gap_text)
+        except ValueError:
+            raise ValueError("gap 必须是 0 到 500 之间的数字") from None
+        if not math.isfinite(gap) or not 0 <= gap <= 500:
+            raise ValueError("gap 必须是 0 到 500 之间的数字")
+        return gap
+
+    @staticmethod
+    def _parse_time_points(time_text: str) -> tuple[str, ...]:
+        parts = tuple(time_text.split("+"))
+        if not parts or any(not part for part in parts):
+            raise ValueError("命令格式不正确")
+        for part in parts:
+            try:
+                value = float(part)
+            except ValueError:
+                raise ValueError("时间点必须是有限数字") from None
+            if not math.isfinite(value):
+                raise ValueError("时间点必须是有限数字")
+        return parts
+
+    @staticmethod
+    def _parse_time_range(
+        time_points: tuple[str, ...],
+        count_error: str,
+    ) -> tuple[str, float]:
+        if len(time_points) != 2:
+            raise ValueError(count_error)
+        start = float(time_points[0])
+        end = float(time_points[1])
+        if end <= start:
+            raise ValueError("时间范围的终点必须大于起点")
+        return time_points[0], end - start
 
     def _parse_convert_spec(self, raw_spec: str) -> tuple[str, str]:
         if not raw_spec:
