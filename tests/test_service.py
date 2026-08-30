@@ -55,15 +55,15 @@ class BeatmapPreviewServiceTests(unittest.TestCase):
         self.assertEqual(config["layout"]["taiko"]["gif"]["FPS"], 30.0)
         self.assertEqual(config["layout"]["mania"]["mp4"]["FPS"], 30)
 
-    def test_core_timeouts_leave_python_five_seconds_to_finish(self) -> None:
+    def test_core_timeouts_use_fixed_defaults(self) -> None:
         schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
         config = self.service.build_config("default")["timeouts"]["render"]
 
-        image_timeout = schema["image_timeout_seconds"]["default"]
-        video_timeout = schema["video_timeout_seconds"]["default"]
-        self.assertEqual(config["PNG_TIMEOUT"], image_timeout - 5)
-        self.assertEqual(config["GIF_TIMEOUT"], image_timeout - 5)
-        self.assertEqual(config["MP4_TIMEOUT"], video_timeout - 5)
+        self.assertNotIn("image_timeout_seconds", schema)
+        self.assertNotIn("video_timeout_seconds", schema)
+        self.assertEqual(config["PNG_TIMEOUT"], 60)
+        self.assertEqual(config["GIF_TIMEOUT"], 60)
+        self.assertEqual(config["MP4_TIMEOUT"], 120)
 
     def test_vgc_and_vgcl_profiles_are_single_cell(self) -> None:
         default = self.service.build_config("default")
@@ -95,6 +95,38 @@ class BeatmapPreviewServiceTests(unittest.TestCase):
         for mode in ("standard", "taiko", "catch", "mania"):
             self.assertEqual(config["layout"][mode]["gif"]["DURATION_MS"], 12500)
             self.assertTrue(config["layout"][mode]["gif"]["SHOW_TIME_LABEL"])
+
+    def test_schema_json_defaults_are_valid(self) -> None:
+        schema = json.loads((PLUGIN_ROOT / "_conf_schema.json").read_text("utf-8"))
+
+        for key in ("default_json",):
+            with self.subTest(key=key):
+                self.assertIsInstance(json.loads(schema[key]["default"]), dict)
+
+    def test_webui_json_changes_apply_to_next_build(self) -> None:
+        live_config = {
+            "default_json": '{"layout":{"standard":{"gif":{"FPS":45}}}}',
+        }
+        service = BeatmapPreviewService(PLUGIN_ROOT, config=live_config)
+
+        self.assertEqual(
+            service.build_config("vgc")["layout"]["standard"]["gif"]["FPS"],
+            45,
+        )
+        live_config["default_json"] = '{"layout":{"standard":{"gif":{"FPS":60}}}}'
+        self.assertEqual(
+            service.build_config("vgc")["layout"]["standard"]["gif"]["FPS"],
+            60,
+        )
+
+    def test_invalid_webui_json_reports_config_key(self) -> None:
+        service = BeatmapPreviewService(
+            PLUGIN_ROOT,
+            config={"default_json": "{\"layout\":["},
+        )
+
+        with self.assertRaisesRegex(ValueError, "default_json JSON 格式错误"):
+            service.build_config("default")
 
     def test_rejects_invalid_gap_values(self) -> None:
         self.service.build_args("123", taiko_gap=0)

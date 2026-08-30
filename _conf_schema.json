@@ -11,16 +11,12 @@
     "hint": "视频队列中包含正在等待和正在渲染的任务。队列已满时拒绝新的 /vv 请求。",
     "default": 3
   },
-  "image_timeout_seconds": {
-    "description": "单个图片最大渲染时长，单位秒",
-    "type": "int",
-    "hint": "单个图片预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
-    "default": 60
-  },
-  "video_timeout_seconds": {
-    "description": "单个视频最大渲染时长，单位秒",
-    "type": "int",
-    "hint": "单个视频预览任务超过该时间后返回超时。注意：同步线程中的任务可能不会立即被强制终止。",
-    "default": 120
+  "default_json": {
+    "description": "核心默认配置（JSON）",
+    "type": "text",
+    "editor_mode": true,
+    "editor_language": "json",
+    "hint": "编辑 JSON 后下次请求立即生效。此配置包含核心超时、各模式 FPS 和 Taiko PNG 默认间距。",
+    "default": "{\n  \"timeouts\": {\n    \"render\": {\n      \"PNG_TIMEOUT\": 60,\n      \"GIF_TIMEOUT\": 60,\n      \"MP4_TIMEOUT\": 120\n    }\n  },\n  \"layout\": {\n    \"standard\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"taiko\": {\n      \"png\": {\"SPACING_PER_BPM\": 0.0},\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"catch\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"mania\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    }\n  }\n}"
   }
 }

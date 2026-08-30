@@ -62,6 +62,7 @@ TEXT_CONVERT_ALIASES = (
     "c",
     "m",
 )
+PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
 
 
 @dataclass(frozen=True)
@@ -92,17 +93,11 @@ class BeatmapPreviewPlugin(Star):
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
-        self.preview_service = BeatmapPreviewService(plugin_root=PLUGIN_ROOT)
-        legacy_timeout_seconds = config.get("preview_timeout_seconds", None)
-        image_timeout_seconds = config.get(
-            "image_timeout_seconds", legacy_timeout_seconds or 60
-        )
-        video_timeout_seconds = config.get(
-            "video_timeout_seconds", legacy_timeout_seconds or 120
+        self.preview_service = BeatmapPreviewService(
+            plugin_root=PLUGIN_ROOT,
+            config=config,
         )
         legacy_image_queue_length = config.get("max_concurrency", 10)
-        self.image_timeout_seconds = max(1, int(image_timeout_seconds))
-        self.video_timeout_seconds = max(1, int(video_timeout_seconds))
         self.max_image_queue_length = max(
             1, int(config.get("max_image_queue_length", legacy_image_queue_length))
         )
@@ -173,9 +168,7 @@ class BeatmapPreviewPlugin(Star):
             render_semaphore = (
                 self._video_render_semaphore if is_video else self._image_render_semaphore
             )
-            timeout_seconds = (
-                self.video_timeout_seconds if is_video else self.image_timeout_seconds
-            )
+            timeout_seconds = PYTHON_RENDER_TIMEOUT_SECONDS
             try:
                 async with render_semaphore:
                     result = await asyncio.wait_for(

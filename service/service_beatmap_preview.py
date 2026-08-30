@@ -11,15 +11,27 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import yaml
-
-
-CONFIG_PROFILE_FILES = {
-    "default": ("default.yml",),
-    "vgc": ("default.yml", "vgc.yml"),
-    "vgcl": ("default.yml", "vgc.yml", "vgcl.yml"),
+CONFIG_PROFILE_KEYS = {
+    "default": ("default_json",),
+    "vgc": ("default_json",),
+    "vgcl": ("default_json",),
 }
 GIF_MODES = ("standard", "taiko", "catch", "mania")
+PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
+VGC_CONFIG = {
+    "layout": {
+        "standard": {"gif": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
+        "taiko": {"gif": {"ROW_COUNT": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
+        "catch": {"gif": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
+        "mania": {"gif": {"IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
+    }
+}
+VGCL_CONFIG = {
+    "layout": {
+        mode: {"gif": {"SHOW_TIME_LABEL": True}}
+        for mode in GIF_MODES
+    }
+}
 
 
 def _detect_binary_path(plugin_root: Path) -> Path:
@@ -85,9 +97,12 @@ def _set_nested(config: dict[str, Any], path: Sequence[str], value: Any) -> None
 class BeatmapPreviewService:
     """通过调用 Rust 二进制文件生成 osu! 谱面预览图和视频。"""
 
-    def __init__(self, plugin_root: Path) -> None:
+    def __init__(self, plugin_root: Path, config: Mapping[str, Any] | None = None) -> None:
         self.plugin_root = plugin_root
-        self.config_root = plugin_root / "configs"
+        # Keep the AstrBot config object, not a copied snapshot.  AstrBot may
+        # update this object when plugin settings are edited; reading it for
+        # every request makes JSON changes effective immediately.
+        self.config = config
         self._binary_path: Path | None = None
 
     @property
@@ -110,7 +125,7 @@ class BeatmapPreviewService:
         config_profile: str = "default",
         taiko_gap: float | None = None,
         gif_duration_ms: int | None = None,
-        timeout: int = 120,
+        timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         args = self.build_args(
             bid,
@@ -215,22 +230,24 @@ class BeatmapPreviewService:
         gif_duration_ms: int | None = None,
     ) -> dict[str, Any]:
         try:
-            filenames = CONFIG_PROFILE_FILES[profile]
+            config_keys = CONFIG_PROFILE_KEYS[profile]
         except KeyError:
             raise ValueError(f"未知配置 profile: {profile}") from None
 
         merged: dict[str, Any] = {}
-        for filename in filenames:
-            path = self.config_root / filename
-            try:
-                loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except (OSError, yaml.YAMLError) as exc:
-                raise ValueError(f"无法读取核心配置 {path}: {exc}") from exc
+        for key in config_keys:
+            loaded = self._load_config_document(key)
             if loaded is None:
                 continue
             if not isinstance(loaded, Mapping):
-                raise ValueError(f"核心配置顶层必须是对象: {path}")
+                raise ValueError(f"配置项顶层必须是对象: {key}")
             _deep_merge(merged, loaded)
+
+        if profile == "vgc":
+            _deep_merge(merged, VGC_CONFIG)
+        elif profile == "vgcl":
+            _deep_merge(merged, VGC_CONFIG)
+            _deep_merge(merged, VGCL_CONFIG)
 
         if taiko_gap is not None:
             _set_nested(
@@ -246,6 +263,37 @@ class BeatmapPreviewService:
                     gif_duration_ms,
                 )
         return merged
+
+    def _load_config_document(self, key: str) -> Any:
+        """Load a JSON document from AstrBot settings or schema defaults."""
+        sentinel = object()
+        raw: Any = sentinel
+        if self.config is not None and key is not None:
+            getter = getattr(self.config, "get", None)
+            if getter is not None:
+                raw = getter(key, sentinel)
+
+        if raw is sentinel:
+            # AstrBot populates schema defaults for new installations.  The
+            # explicit fallback also keeps direct service users/tests working
+            # when no AstrBot config object is supplied.
+            schema_path = self.plugin_root / "_conf_schema.json"
+            try:
+                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                raw = schema[key]["default"]
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"无法读取配置默认值 {schema_path}: {exc}") from exc
+
+        if isinstance(raw, Mapping):
+            return raw
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return None
+        if not isinstance(raw, str):
+            raise ValueError(f"配置项 {key} 必须是 JSON 文本")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"配置项 {key} JSON 格式错误: {exc}") from exc
 
     @staticmethod
     def _format_number(value: float) -> str:
