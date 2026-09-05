@@ -17,14 +17,14 @@
 
 ## 核心配置
 
-插件使用上游 v1.0.8 的 `--config` 接口，并在每次请求前合并配置页中的三段 JSON：
+插件使用上游 v1.1.1 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
 
-- `default_json`：全局默认覆盖，包含核心超时（PNG/GIF/MP4 为 60/60/120 秒）、Taiko/Mania 30 FPS 和 Taiko PNG 默认 gap。
-- `/vgc` 和 `/vgcl` 的单屏 GIF 布局由插件固定提供，不再作为配置项暴露。
+- `default_json`：上游配置覆盖，字段使用 `timeout`、`render.<mode>.<format>.structure/style` 等当前配置结构，默认包含核心超时、各模式 30 FPS 和 Taiko PNG 默认 gap。
+- `/vgc` 和 `/vgcl` 的单屏 GIF 布局由插件固定提供；两者的 Mania GIF 都不显示 SV 标签。
 
 配置会递归合并后作为单个内联 JSON 传给核心，因此 `gap=` 和自定义单屏时长可与上述布局同时生效。
 
-三段 JSON 使用大文本编辑框展示。保存后会从下一次渲染请求开始生效，无需修改插件目录或重启。
+JSON 使用大文本编辑框展示。保存后会从下一次渲染请求开始生效，无需修改插件目录或重启。
 
 ## 安装
 

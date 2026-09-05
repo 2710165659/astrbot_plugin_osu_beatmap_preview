@@ -2,6 +2,18 @@
 
 ## [0.2.x]
 
+### [0.2.8] - 2026-09-05
+
+#### 破坏性变更
+
+- 同步上游 osu-beatmap-preview v1.1.1 的配置结构，`default_json` 改用 `timeout` 和 `render.*.*.structure/style` 字段。
+- 移除旧版配置、队列和参数兼容逻辑；参数合法性统一交给 Rust 核心校验，核心错误直接返回插件。
+- 新版不迁移旧版输出缓存或下载缓存。升级后请清理 osu-beatmap-preview 缓存，再使用新版插件。
+
+#### 修复
+
+- 修复 `/vgc` 和 `/vgcl` 的 Mania GIF 仍显示 SV 标签的问题。
+
 ### [0.2.6] - 2026-08-30
 
 - 同步上游 osu-beatmap-preview [v1.0.8](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.0.8)，适配新的 `--mod`、`--time-points`、`--duration-time` 和 `--config` 命令行接口。

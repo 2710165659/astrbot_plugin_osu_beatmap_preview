@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import os
 import platform
 import stat
@@ -19,16 +18,16 @@ CONFIG_PROFILE_KEYS = {
 GIF_MODES = ("standard", "taiko", "catch", "mania")
 PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
 VGC_CONFIG = {
-    "layout": {
-        "standard": {"gif": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
-        "taiko": {"gif": {"ROW_COUNT": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
-        "catch": {"gif": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
-        "mania": {"gif": {"IMAGES_PER_ROW": 1, "SHOW_TIME_LABEL": False, "DURATION_MS": 10000}},
+    "render": {
+        "standard": {"gif": {"structure": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
+        "taiko": {"gif": {"structure": {"ROW_COUNT": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
+        "catch": {"gif": {"structure": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
+        "mania": {"gif": {"structure": {"IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "SHOW_SV_LABEL": False, "DURATION_MS": 10000}}},
     }
 }
 VGCL_CONFIG = {
-    "layout": {
-        mode: {"gif": {"SHOW_TIME_LABEL": True}}
+    "render": {
+        mode: {"gif": {"style": {"SHOW_TIME_LABEL": True}}}
         for mode in GIF_MODES
     }
 }
@@ -84,16 +83,6 @@ def _deep_merge(base: dict[str, Any], overlay: Mapping[str, Any]) -> None:
             base[key] = copy.deepcopy(value)
 
 
-def _set_nested(config: dict[str, Any], path: Sequence[str], value: Any) -> None:
-    current = config
-    for key in path[:-1]:
-        child = current.setdefault(key, {})
-        if not isinstance(child, dict):
-            raise ValueError(f"配置路径 {'.'.join(path)} 与现有标量冲突")
-        current = child
-    current[path[-1]] = value
-
-
 class BeatmapPreviewService:
     """通过调用 Rust 二进制文件生成 osu! 谱面预览图和视频。"""
 
@@ -123,7 +112,7 @@ class BeatmapPreviewService:
         duration_time: float | None = None,
         no_cache: bool = False,
         config_profile: str = "default",
-        taiko_gap: float | None = None,
+        taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
         timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
@@ -174,23 +163,10 @@ class BeatmapPreviewService:
         duration_time: float | None = None,
         no_cache: bool = False,
         config_profile: str = "default",
-        taiko_gap: float | None = None,
+        taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
     ) -> list[str]:
         bid = bid.strip()
-        if not bid.isdigit():
-            raise ValueError("只支持纯数字 bid，例如：/v 5199917")
-        if duration_time is not None and (
-            not math.isfinite(duration_time) or duration_time <= 0
-        ):
-            raise ValueError("视频时长必须是有限正数")
-        if taiko_gap is not None and (
-            not math.isfinite(taiko_gap) or not 0 <= taiko_gap <= 500
-        ):
-            raise ValueError("gap 必须是 0 到 500 之间的数字")
-        if gif_duration_ms is not None and gif_duration_ms <= 0:
-            raise ValueError("GIF 片段时长必须大于 0 毫秒")
-
         args = [str(self.binary_path), "--bid", bid]
         if convert:
             args += ["--convert", convert]
@@ -198,16 +174,12 @@ class BeatmapPreviewService:
             args += ["--fmt", fmt]
         for mod in mods:
             mod = mod.strip()
-            if not mod:
-                raise ValueError("Mod 不能为空")
             args += ["--mod", mod]
         for time_point in time_points:
             time_point = str(time_point).strip()
-            if not time_point:
-                raise ValueError("时间点不能为空")
             args += ["--time-points", time_point]
         if duration_time is not None:
-            args += ["--duration-time", self._format_number(duration_time)]
+            args += ["--duration-time", str(duration_time)]
         if no_cache:
             args.append("--no-cache")
 
@@ -226,7 +198,7 @@ class BeatmapPreviewService:
         self,
         profile: str,
         *,
-        taiko_gap: float | None = None,
+        taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
     ) -> dict[str, Any]:
         try:
@@ -250,22 +222,20 @@ class BeatmapPreviewService:
             _deep_merge(merged, VGCL_CONFIG)
 
         if taiko_gap is not None:
-            _set_nested(
+            _deep_merge(
                 merged,
-                ("layout", "taiko", "png", "SPACING_PER_BPM"),
-                taiko_gap,
+                {"render": {"taiko": {"png": {"style": {"SPACING_PER_BPM": taiko_gap}}}}},
             )
         if gif_duration_ms is not None:
             for mode in GIF_MODES:
-                _set_nested(
+                _deep_merge(
                     merged,
-                    ("layout", mode, "gif", "DURATION_MS"),
-                    gif_duration_ms,
+                    {"render": {mode: {"gif": {"style": {"DURATION_MS": gif_duration_ms}}}}},
                 )
         return merged
 
     def _load_config_document(self, key: str) -> Any:
-        """Load a JSON document from AstrBot settings or schema defaults."""
+        """Load a JSON document from the current AstrBot settings."""
         sentinel = object()
         raw: Any = sentinel
         if self.config is not None and key is not None:
@@ -274,15 +244,7 @@ class BeatmapPreviewService:
                 raw = getter(key, sentinel)
 
         if raw is sentinel:
-            # AstrBot populates schema defaults for new installations.  The
-            # explicit fallback also keeps direct service users/tests working
-            # when no AstrBot config object is supplied.
-            schema_path = self.plugin_root / "_conf_schema.json"
-            try:
-                schema = json.loads(schema_path.read_text(encoding="utf-8"))
-                raw = schema[key]["default"]
-            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                raise ValueError(f"无法读取配置默认值 {schema_path}: {exc}") from exc
+            return None
 
         if isinstance(raw, Mapping):
             return raw
@@ -294,10 +256,6 @@ class BeatmapPreviewService:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError(f"配置项 {key} JSON 格式错误: {exc}") from exc
-
-    @staticmethod
-    def _format_number(value: float) -> str:
-        return format(value, ".15g")
 
     @staticmethod
     def _parse_process_result(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
