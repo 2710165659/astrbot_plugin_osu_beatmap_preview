@@ -16,7 +16,7 @@
     "type": "text",
     "editor_mode": true,
     "editor_language": "json",
-    "hint": "编辑 JSON 后下次请求立即生效。此配置包含核心超时、各模式 FPS 和 Taiko PNG 默认间距。",
-    "default": "{\n  \"timeouts\": {\n    \"render\": {\n      \"PNG_TIMEOUT\": 60,\n      \"GIF_TIMEOUT\": 60,\n      \"MP4_TIMEOUT\": 120\n    }\n  },\n  \"layout\": {\n    \"standard\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"taiko\": {\n      \"png\": {\"SPACING_PER_BPM\": 0.0},\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"catch\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    },\n    \"mania\": {\n      \"gif\": {\"FPS\": 30, \"DURATION_MS\": 5000},\n      \"mp4\": {\"FPS\": 30}\n    }\n  }\n}"
+    "hint": "编辑 JSON 后下次请求立即生效。字段结构与上游 osu-beatmap-preview v1.1.1 的 --config 一致。",
+    "default": "{\n  \"timeout\": {\n    \"PNG_TIMEOUT\": 60,\n    \"GIF_TIMEOUT\": 60,\n    \"MP4_TIMEOUT\": 120\n  },\n  \"render\": {\n    \"standard\": {\n      \"gif\": {\"style\": {\"FPS\": 30, \"DURATION_MS\": 5000}},\n      \"mp4\": {\"style\": {\"FPS\": 30}}\n    },\n    \"taiko\": {\n      \"png\": {\"style\": {\"SPACING_PER_BPM\": 0.0}},\n      \"gif\": {\"style\": {\"FPS\": 30, \"DURATION_MS\": 5000}},\n      \"mp4\": {\"style\": {\"FPS\": 30}}\n    },\n    \"catch\": {\n      \"gif\": {\"style\": {\"FPS\": 30, \"DURATION_MS\": 5000}},\n      \"mp4\": {\"style\": {\"FPS\": 30}}\n    },\n    \"mania\": {\n      \"gif\": {\"style\": {\"FPS\": 30, \"DURATION_MS\": 5000}},\n      \"mp4\": {\"style\": {\"FPS\": 30}}\n    }\n  }\n}"
   }
 }

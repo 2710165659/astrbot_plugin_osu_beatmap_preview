@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import math
 import os
 import re
 import sys
@@ -75,7 +74,7 @@ class PreviewRequest:
     mods: tuple[str, ...]
     time_points: tuple[str, ...]
     duration_time: float | None
-    taiko_gap: float | None
+    taiko_gap: str | None
     no_cache: bool
     full_video: bool = False
     config_profile: str = "default"
@@ -86,7 +85,7 @@ class PreviewRequest:
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.6",
+    "0.2.8",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -97,9 +96,8 @@ class BeatmapPreviewPlugin(Star):
             plugin_root=PLUGIN_ROOT,
             config=config,
         )
-        legacy_image_queue_length = config.get("max_concurrency", 10)
         self.max_image_queue_length = max(
-            1, int(config.get("max_image_queue_length", legacy_image_queue_length))
+            1, int(config.get("max_image_queue_length", 10))
         )
         self.max_video_queue_length = max(
             1, int(config.get("max_video_queue_length", 3))
@@ -272,7 +270,7 @@ class BeatmapPreviewPlugin(Star):
             convert, tail = self._parse_convert_spec(tail[1:].lstrip())
 
         tail = tail.lstrip()
-        bid_match = re.match(r"^\d+", tail)
+        bid_match = re.match(r"^[^+\s]+", tail)
         if bid_match is None:
             raise ValueError("命令格式不正确")
 
@@ -330,36 +328,15 @@ class BeatmapPreviewPlugin(Star):
     def _parse_mods(mod_text: str | None) -> tuple[str, ...]:
         if mod_text is None:
             return ()
-        mods = tuple(mod_text.split("+"))
-        if any(not mod for mod in mods):
-            raise ValueError("命令格式不正确")
-        return mods
+        return tuple(mod_text.split("+"))
 
     @staticmethod
-    def _parse_gap(gap_text: str | None) -> float | None:
-        if gap_text is None:
-            return None
-        try:
-            gap = float(gap_text)
-        except ValueError:
-            raise ValueError("gap 必须是 0 到 500 之间的数字") from None
-        if not math.isfinite(gap) or not 0 <= gap <= 500:
-            raise ValueError("gap 必须是 0 到 500 之间的数字")
-        return gap
+    def _parse_gap(gap_text: str | None) -> str | None:
+        return gap_text
 
     @staticmethod
     def _parse_time_points(time_text: str) -> tuple[str, ...]:
-        parts = tuple(time_text.split("+"))
-        if not parts or any(not part for part in parts):
-            raise ValueError("命令格式不正确")
-        for part in parts:
-            try:
-                value = float(part)
-            except ValueError:
-                raise ValueError("时间点必须是有限数字") from None
-            if not math.isfinite(value):
-                raise ValueError("时间点必须是有限数字")
-        return parts
+        return tuple(time_text.split("+"))
 
     @staticmethod
     def _parse_time_range(
@@ -370,8 +347,6 @@ class BeatmapPreviewPlugin(Star):
             raise ValueError(count_error)
         start = float(time_points[0])
         end = float(time_points[1])
-        if end <= start:
-            raise ValueError("时间范围的终点必须大于起点")
         return time_points[0], end - start
 
     def _parse_convert_spec(self, raw_spec: str) -> tuple[str, str]:
@@ -443,10 +418,6 @@ class BeatmapPreviewPlugin(Star):
                 gap_text = param_part[pos:end]
                 pos = end
                 if not gap_text:
-                    raise ValueError("命令格式不正确")
-                try:
-                    float(gap_text)
-                except ValueError:
                     raise ValueError("命令格式不正确")
             elif m_time:
                 pos += m_time.end()
