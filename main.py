@@ -85,7 +85,7 @@ class PreviewRequest:
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.8",
+    "0.2.9",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""

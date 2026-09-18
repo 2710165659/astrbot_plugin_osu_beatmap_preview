@@ -33,31 +33,47 @@ VGCL_CONFIG = {
 }
 
 
-def _detect_binary_path(plugin_root: Path) -> Path:
-    """Detect the platform and return the path to the appropriate binary."""
+def _binary_names() -> tuple[str, ...]:
+    """当前平台可能的二进制文件名，按优先级排列。
+
+    上游自 1.2.0 起改为 Cargo workspace，CLI 产物名从 `osu-beatmap-preview-*`
+    变成 `osu-beatmap-preview-*-cli`；这里同时接受两种命名，旧核心目录无需改名也能继续使用。
+    """
     system = sys.platform
     machine = platform.machine().lower()
 
     if system == "win32":
-        binary_name = "osu-beatmap-preview-windows-amd64.exe"
+        stem = "osu-beatmap-preview-windows-amd64"
     elif system == "darwin":
-        if machine == "arm64":
-            binary_name = "osu-beatmap-preview-macos-arm64"
-        else:
-            binary_name = "osu-beatmap-preview-macos-amd64"
+        stem = (
+            "osu-beatmap-preview-macos-arm64"
+            if machine == "arm64"
+            else "osu-beatmap-preview-macos-amd64"
+        )
     elif system == "linux":
-        binary_name = "osu-beatmap-preview-linux-amd64"
+        stem = "osu-beatmap-preview-linux-amd64"
     else:
         raise Exception(f"不支持的平台: {system}")
 
-    binary_path = plugin_root / "bin" / binary_name
-    if not binary_path.exists():
-        update_script = "update_core.bat"
-        raise Exception(
-            f"核心二进制文件不存在: {binary_path}\n"
-            f"请运行 {update_script} 下载最新核心"
-        )
-    return binary_path
+    suffix = ".exe" if system == "win32" else ""
+    return (f"{stem}-cli{suffix}", f"{stem}{suffix}")
+
+
+def _detect_binary_path(plugin_root: Path) -> Path:
+    """Detect the platform and return the path to the appropriate binary."""
+    bin_dir = plugin_root / "bin"
+    candidates = [bin_dir / name for name in _binary_names()]
+
+    for binary_path in candidates:
+        if binary_path.exists():
+            return binary_path
+
+    expected = "\n".join(f"  - {path.name}" for path in candidates)
+    raise Exception(
+        f"核心二进制文件不存在，已尝试以下文件名:\n{expected}\n"
+        f"查找目录: {bin_dir}\n"
+        f"请运行 update_core.bat 下载最新核心"
+    )
 
 
 def _ensure_executable(binary_path: Path) -> None:

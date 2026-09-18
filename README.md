@@ -17,10 +17,11 @@
 
 ## 核心配置
 
-插件使用上游 v1.1.1 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
+插件使用上游 v1.3.2 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
 
 - `default_json`：上游配置覆盖，字段使用 `timeout`、`render.<mode>.<format>.structure/style` 等当前配置结构，默认包含核心超时、各模式 30 FPS 和 Taiko PNG 默认 gap。
 - `/vgc` 和 `/vgcl` 的单屏 GIF 布局由插件固定提供；两者的 Mania GIF 都不显示 SV 标签。
+- 上游 v1.3.0 起支持打击音，可在 `render.<mode>.mp4.style` 中设置 `ENABLE_HITSOUND`、`ENABLE_BEATMAP_HITSOUND` 和 `HITSOUND_VOLUME`；插件默认不覆盖这些字段，使用上游默认值。
 
 配置会递归合并后作为单个内联 JSON 传给核心，因此 `gap=` 和自定义单屏时长可与上述布局同时生效。
 
@@ -73,8 +74,11 @@ https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
 .\update_core.bat
 ```
 
-二进制文件按平台自动选择：
-- Windows: `bin/osu-beatmap-preview-windows-amd64.exe`
-- Linux: `bin/osu-beatmap-preview-linux-amd64`
-- macOS Intel: `bin/osu-beatmap-preview-macos-amd64`
-- macOS Apple Silicon: `bin/osu-beatmap-preview-macos-arm64`
+二进制文件按平台自动选择（上游自 v1.2.0 起 CLI 产物名以 `-cli` 结尾）：
+
+- Windows: `bin/osu-beatmap-preview-windows-amd64-cli.exe`
+- Linux: `bin/osu-beatmap-preview-linux-amd64-cli`
+- macOS Intel: `bin/osu-beatmap-preview-macos-amd64-cli`
+- macOS Apple Silicon: `bin/osu-beatmap-preview-macos-arm64-cli`
+
+插件同时兼容旧命名（`bin/osu-beatmap-preview-windows-amd64.exe` 等），但 `update_core.bat` 只会下载新的 `-cli` 产物。

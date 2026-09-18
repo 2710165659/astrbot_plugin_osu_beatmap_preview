@@ -1,8 +1,9 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 
-rem Download latest osu-beatmap-preview Rust binaries from GitHub releases.
+rem Download latest osu-beatmap-preview Rust CLI binaries from GitHub releases.
 rem Platforms: Windows amd64, Linux amd64, macOS amd64, macOS arm64.
+rem Upstream names the CLI assets with a "-cli" suffix since v1.2.0.
 
 set "REPO=2710165659/osu-beatmap-preview"
 set "BIN_DIR=%~dp0bin"
@@ -28,28 +29,28 @@ set "BASE_URL=https://github.com/%REPO%/releases/download/%TAG%"
 rem --- Windows amd64 ---
 echo   [1/4] windows-amd64 ...
 powershell -NoProfile -Command ^
-  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-windows-amd64.exe' -OutFile '%BIN_DIR%\osu-beatmap-preview-windows-amd64.exe'" -ErrorAction Stop
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-windows-amd64-cli.exe' -OutFile '%BIN_DIR%\osu-beatmap-preview-windows-amd64-cli.exe'" -ErrorAction Stop
 if errorlevel 1 goto :fail
 echo     ok
 
 rem --- Linux amd64 ---
 echo   [2/4] linux-amd64 ...
 powershell -NoProfile -Command ^
-  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-linux-amd64' -OutFile '%BIN_DIR%\osu-beatmap-preview-linux-amd64'" -ErrorAction Stop
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-linux-amd64-cli' -OutFile '%BIN_DIR%\osu-beatmap-preview-linux-amd64-cli'" -ErrorAction Stop
 if errorlevel 1 goto :fail
 echo     ok
 
 rem --- macOS amd64 ---
 echo   [3/4] macos-amd64 ...
 powershell -NoProfile -Command ^
-  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-amd64' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-amd64'" -ErrorAction Stop
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-amd64-cli' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-amd64-cli'" -ErrorAction Stop
 if errorlevel 1 goto :fail
 echo     ok
 
 rem --- macOS arm64 ---
 echo   [4/4] macos-arm64 ...
 powershell -NoProfile -Command ^
-  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-arm64' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-arm64'" -ErrorAction Stop
+  "Invoke-WebRequest -Uri '%BASE_URL%/osu-beatmap-preview-macos-arm64-cli' -OutFile '%BIN_DIR%\osu-beatmap-preview-macos-arm64-cli'" -ErrorAction Stop
 if errorlevel 1 goto :fail
 echo     ok
 

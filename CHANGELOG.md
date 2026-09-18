@@ -2,6 +2,26 @@
 
 ## [0.2.x]
 
+### [0.2.9] - 2026-09-18
+
+同步上游 osu-beatmap-preview [v1.3.2](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.3.2)（自 v1.1.1 起跨过 v1.2.x / v1.3.x 的重构）。
+
+#### 破坏性变更
+
+- 上游自 v1.2.0 起改为 Cargo workspace，CLI 产物名由 `osu-beatmap-preview-<平台>-<架构>` 变为 `osu-beatmap-preview-<平台>-<架构>-cli`。`bin/` 下的核心文件需要按新命名放置（`update_core.bat` 已同步），插件同时兼容两种文件名。
+- 上游 v1.2.0 起输出目录按配置差异追加 6 位哈希子目录，同一个谱面的不同配置会落在不同目录下；旧版本的输出缓存不再命中。
+
+#### 变更
+
+- `update_core.bat`：下载地址改为上游新的 `-cli` 产物名。
+- 核心错误改为写入 stderr、成功结果仍为 stdout JSON，插件沿用既有的 stdout/stderr 解析逻辑，无需改动。
+
+#### 说明
+
+- `--bid`/`--convert`/`--mod`/`--fmt`/`--time-points`/`--duration-time`/`--no-cache`/`--config` 参数与 `render.<模式>.<格式>.structure/style`、`timeout` 配置结构自 v1.1.1 起未变，插件调用方式保持不变。
+- 上游 v1.3.0 起 MP4 支持打击音（`ENABLE_HITSOUND`、`ENABLE_BEATMAP_HITSOUND`、`HITSOUND_VOLUME`），默认开启，可在 `default_json` 中关闭或调整音量。
+- 用户配置页中的 `timeout.MP4_TIMEOUT` 默认值仍为 120 秒，低于上游新默认值 600 秒，长视频如需完整渲染时间可自行调大。
+
 ### [0.2.8] - 2026-09-05
 
 #### 破坏性变更
