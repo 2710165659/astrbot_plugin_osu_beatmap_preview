@@ -15,9 +15,16 @@
 
 `/vgc <BID>` 和 `/vgcl <BID>` 分别生成无时间标签和带时间标签的单屏连续 GIF，也可以用 `t=起点+终点` 指定范围。
 
+Taiko / Catch / Mania 的 PNG 支持区间段渲染（原生谱面与 `:模式` 转谱均可）：`t=起点+终点` 只渲染 `[起点, 终点]` 这一段，例如：
+
+```text
+/vp:3 123456 t=30+60
+/vp 123456 t=60+90
+```
+
 ## 核心配置
 
-插件使用上游 v1.3.2 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
+插件使用上游 v1.3.3 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
 
 - `default_json`：上游配置覆盖，字段使用 `timeout`、`render.<mode>.<format>.structure/style` 等当前配置结构，默认包含核心超时、各模式 30 FPS 和 Taiko PNG 默认 gap。
 - `/vgc` 和 `/vgcl` 的单屏 GIF 布局由插件固定提供；两者的 Mania GIF 都不显示 SV 标签。
