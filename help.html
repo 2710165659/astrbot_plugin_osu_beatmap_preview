@@ -573,7 +573,8 @@
     </div>
     <div class="param">
       <div class="name">t=&lt;时间点&gt;</div>
-      <div class="desc">时间单位为秒。普通 GIF 最多支持四个时间点；MP4、<code>/vgc</code> 和 <code>/vgcl</code> 需要两个时间点指定连续片段。</div>
+      <div class="desc">时间单位为秒。普通 GIF 最多支持四个时间点；MP4、<code>/vgc</code> 和 <code>/vgcl</code> 需要两个时间点指定连续片段；Taiko / Catch / Mania 的 PNG（原生谱面与 <code>:模式</code> 转谱均可）用
+        <code>t=起点+终点</code> 渲染该区间段。</div>
     </div>
     <div class="param">
       <div class="name">gap=&lt;BPM&gt;</div>
@@ -612,6 +613,9 @@
     </div>
     <div class="example"><span class="tag">时间点</span>
       <div class="cmd"><span class="k">/vg</span> <span class="v">123456</span> <span class="v">t=10+25+60</span></div>
+    </div>
+    <div class="example"><span class="tag">PNG区间</span>
+      <div class="cmd"><span class="k">/vp:3</span> <span class="v">123456</span> <span class="v">t=30+60</span></div>
     </div>
     <div class="example"><span class="tag">视频片段</span>
       <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span> <span class="v">t=30+60</span></div>

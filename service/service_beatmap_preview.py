@@ -17,6 +17,10 @@ CONFIG_PROFILE_KEYS = {
 }
 GIF_MODES = ("standard", "taiko", "catch", "mania")
 PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
+# 核心对 Taiko/Catch/Mania PNG 的区间段输出只接受一个 --time-points。
+# 原生谱面的目标模式只有核心解析后才知道，靠这条报错把 t=a+b
+# 从「两个时间点」回退改判为 [a, b] 区间渲染。
+SEGMENT_PNG_TIME_POINT_LIMIT_ERROR = "accepts at most one --time-points value"
 VGC_CONFIG = {
     "render": {
         "standard": {"gif": {"structure": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
@@ -130,21 +134,41 @@ class BeatmapPreviewService:
         config_profile: str = "default",
         taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
+        fallback_time_points: Sequence[str] = (),
+        fallback_duration_time: float | None = None,
         timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
-        args = self.build_args(
-            bid,
+        shared = dict(
             fmt=fmt,
             convert=convert,
             mods=mods,
-            time_points=time_points,
-            duration_time=duration_time,
             no_cache=no_cache,
             config_profile=config_profile,
             taiko_gap=taiko_gap,
             gif_duration_ms=gif_duration_ms,
         )
+        args = self.build_args(
+            bid,
+            time_points=time_points,
+            duration_time=duration_time,
+            **shared,
+        )
+        try:
+            return self._render(args, timeout)
+        except Exception as exc:
+            if not fallback_time_points or SEGMENT_PNG_TIME_POINT_LIMIT_ERROR not in str(exc):
+                raise
 
+        # 原生 Taiko/Catch/Mania 谱面的 PNG 区间段：把 t=a+b 按 [a, b] 重试一次。
+        args = self.build_args(
+            bid,
+            time_points=fallback_time_points,
+            duration_time=fallback_duration_time,
+            **shared,
+        )
+        return self._render(args, timeout)
+
+    def _render(self, args: list[str], timeout: int) -> dict[str, Any]:
         try:
             result = subprocess.run(
                 args,

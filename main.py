@@ -79,13 +79,17 @@ class PreviewRequest:
     full_video: bool = False
     config_profile: str = "default"
     gif_duration_ms: int | None = None
+    # 原生谱面的目标模式未知时，t=a+b 先按两个时间点渲染；
+    # 核心判定为 Taiko/Catch/Mania PNG 区间段时用该回退参数改渲染 [a, b]。
+    fallback_time_points: tuple[str, ...] = ()
+    fallback_duration_time: float | None = None
 
 
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.2.9",
+    "0.3.0",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -182,6 +186,8 @@ class BeatmapPreviewPlugin(Star):
                             config_profile=request.config_profile,
                             taiko_gap=request.taiko_gap,
                             gif_duration_ms=request.gif_duration_ms,
+                            fallback_time_points=request.fallback_time_points,
+                            fallback_duration_time=request.fallback_duration_time,
                             timeout=timeout_seconds,
                         ),
                         timeout=timeout_seconds,
@@ -287,6 +293,8 @@ class BeatmapPreviewPlugin(Star):
         time_points: tuple[str, ...] = ()
         duration_time = None
         gif_duration_ms = None
+        fallback_time_points: tuple[str, ...] = ()
+        fallback_duration_time = None
         if time_text is not None:
             parsed_times = self._parse_time_points(time_text)
             if fmt == "mp4":
@@ -304,8 +312,26 @@ class BeatmapPreviewPlugin(Star):
                 gif_duration_ms = round(duration * 1000)
                 if gif_duration_ms <= 0:
                     raise ValueError("GIF 单屏模式的时间范围至少需要 0.001 秒")
+            elif convert is not None and fmt in (None, "png"):
+                # Taiko/Catch/Mania PNG 的区间段渲染：t=a+b 表示渲染 [a, b]。
+                start, duration = self._parse_time_range(
+                    parsed_times,
+                    "Taiko/Catch/Mania PNG 的区间渲染需要两个时间点，例如：t=30+60",
+                )
+                time_points = (start,)
+                duration_time = duration
             else:
                 time_points = tuple(parsed_times)
+                if fmt in (None, "png") and len(parsed_times) == 2:
+                    # 原生谱面的目标模式要等核心解析后才知道：
+                    # 先按两个时间点渲染，核心判定为 Taiko/Catch/Mania PNG
+                    # （区间段输出只接受一个时间点）时改用 [a, b] 区间重试。
+                    start, duration = self._parse_time_range(
+                        parsed_times,
+                        "时间范围需要两个时间点，例如：t=30+60",
+                    )
+                    fallback_time_points = (start,)
+                    fallback_duration_time = duration
         elif fmt == "mp4" and not full_video:
             time_points = ("preview",)
             duration_time = 30.0
@@ -322,6 +348,8 @@ class BeatmapPreviewPlugin(Star):
             full_video=full_video,
             config_profile=config_profile,
             gif_duration_ms=gif_duration_ms,
+            fallback_time_points=fallback_time_points,
+            fallback_duration_time=fallback_duration_time,
         )
 
     @staticmethod
