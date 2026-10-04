@@ -1,42 +1,33 @@
 # astrbot_plugin_osu_beatmap_preview
 
-把 Rust 版 `osu-beatmap-preview` core 封装成 AstrBot 插件，通过调用二进制文件渲染谱面预览图和带原始音频的 MP4 视频。
+AstrBot 的 osu! 谱面预览插件，渲染内核为 Rust 版 [osu-beatmap-preview](https://github.com/2710165659/osu-beatmap-preview)：在聊天中发送谱面 ID，即可生成 Standard / Taiko / Catch / Mania 四模式的预览长图、GIF 与带原始音频的 MP4 视频。
+
+- 支持 Mod 组合、转谱（`:t` / `:c` / `:m`）、时间点与区间渲染、Taiko 自定义间距。
+- MP4 支持背景视频、故事板与打击音，可渲染完整谱面或指定片段。
+- 零 Python 依赖，核心是单个二进制文件，Windows / Linux / macOS 均可运行。
 
 ## 功能如图
 
-![help](help.png)
+<img src="https://raw.githubusercontent.com/2710165659/astrbot_plugin_osu_beatmap_preview/main/help.png" alt="点击查看使用说明" />
 
-视频使用 `/vv <BID>` 默认渲染 `PreviewTime` 附近约 30 秒。加上 `--full` 可渲染完整谱面；填写 `t=` 时用两个时间点指定片段的起点和终点，单位为秒，例如：
-
-```text
-/vv 123456 t=30+60
-/vv 123456 --full
-```
-
-`/vgc <BID>` 和 `/vgcl <BID>` 分别生成无时间标签和带时间标签的单屏连续 GIF，也可以用 `t=起点+终点` 指定范围。
-
-Taiko / Catch / Mania 的 PNG 支持区间段渲染（原生谱面与 `:模式` 转谱均可）：`t=起点+终点` 只渲染 `[起点, 终点]` 这一段，例如：
+示例：
 
 ```text
-/vp:3 123456 t=30+60
-/vp 123456 t=60+90
+基本:     /v 123456·/v:3 123456·/vg:3 123456
+Mod:      /v 123456+hd+hr
+时间:     /vg 123456 t=10+25+60·/vp:3 123456 t=30+60
+视频:     /vv 123456·/vv 123456 t=30+60·/vv 123456 --full --bg
+GIF单屏:  /vgc 123456·/vgcl 123456 t=-2+10
+复杂:     /vg:3 123456+4k+ds+in+dt1.2 t=10+30+50
 ```
 
 ## 核心配置
 
-插件使用上游 v1.3.3 的 `--config` 接口，并在每次请求前合并配置页中的 JSON：
-
-- `default_json`：上游配置覆盖，字段使用 `timeout`、`render.<mode>.<format>.structure/style` 等当前配置结构，默认包含核心超时、各模式 30 FPS 和 Taiko PNG 默认 gap。
-- `/vgc` 和 `/vgcl` 的单屏 GIF 布局由插件固定提供；两者的 Mania GIF 都不显示 SV 标签。
-- 上游 v1.3.0 起支持打击音，可在 `render.<mode>.mp4.style` 中设置 `ENABLE_HITSOUND`、`ENABLE_BEATMAP_HITSOUND` 和 `HITSOUND_VOLUME`；插件默认不覆盖这些字段，使用上游默认值。
-
-配置会递归合并后作为单个内联 JSON 传给核心，因此 `gap=` 和自定义单屏时长可与上述布局同时生效。
-
-JSON 使用大文本编辑框展示。保存后会从下一次渲染请求开始生效，无需修改插件目录或重启。
+参考：[这里](https://github.com/2710165659/osu-beatmap-preview/tree/main/crates/osu-beatmap-preview-cli#%E9%85%8D%E7%BD%AE)
 
 ## 安装
 
-### 方式一：从插件市场安装（不可用：一直没人审核）
+### 方式一：从插件市场安装
 
 在 AstrBot WebUI 中打开插件市场，搜索：`osu!谱面预览` 找到插件后点击安装即可。
 

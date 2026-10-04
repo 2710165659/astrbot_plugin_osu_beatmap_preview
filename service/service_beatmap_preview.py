@@ -35,6 +35,20 @@ VGCL_CONFIG = {
         for mode in GIF_MODES
     }
 }
+# --bg：渲染背景视频与故事板（上游 v1.4.0 起四模式 mp4 各带这两个开关，默认关闭）。
+BG_CONFIG = {
+    "render": {
+        mode: {
+            "mp4": {
+                "style": {
+                    "ENABLE_BACKGROUND_VIDEO": True,
+                    "ENABLE_STORYBOARD": True,
+                }
+            }
+        }
+        for mode in GIF_MODES
+    }
+}
 
 
 def _binary_names() -> tuple[str, ...]:
@@ -131,6 +145,7 @@ class BeatmapPreviewService:
         time_points: Sequence[str] = (),
         duration_time: float | None = None,
         no_cache: bool = False,
+        bg: bool = False,
         config_profile: str = "default",
         taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
@@ -143,6 +158,7 @@ class BeatmapPreviewService:
             convert=convert,
             mods=mods,
             no_cache=no_cache,
+            bg=bg,
             config_profile=config_profile,
             taiko_gap=taiko_gap,
             gif_duration_ms=gif_duration_ms,
@@ -202,6 +218,7 @@ class BeatmapPreviewService:
         time_points: Sequence[str] = (),
         duration_time: float | None = None,
         no_cache: bool = False,
+        bg: bool = False,
         config_profile: str = "default",
         taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
@@ -227,6 +244,7 @@ class BeatmapPreviewService:
             config_profile,
             taiko_gap=taiko_gap,
             gif_duration_ms=gif_duration_ms,
+            bg=bg,
         )
         args += [
             "--config",
@@ -240,6 +258,7 @@ class BeatmapPreviewService:
         *,
         taiko_gap: str | float | None = None,
         gif_duration_ms: int | None = None,
+        bg: bool = False,
     ) -> dict[str, Any]:
         try:
             config_keys = CONFIG_PROFILE_KEYS[profile]
@@ -272,6 +291,9 @@ class BeatmapPreviewService:
                     merged,
                     {"render": {mode: {"gif": {"style": {"DURATION_MS": gif_duration_ms}}}}},
                 )
+        if bg:
+            # --bg 开启背景视频与故事板渲染，覆盖 default_json 中的同名开关。
+            _deep_merge(merged, BG_CONFIG)
         return merged
 
     def _load_config_document(self, key: str) -> Any:

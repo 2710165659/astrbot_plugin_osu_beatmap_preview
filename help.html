@@ -285,6 +285,11 @@
       color: var(--yellow);
     }
 
+    .example .cmd .sep {
+      color: var(--dim);
+      margin: 0 10px;
+    }
+
     /* ===== Mod 支持：按模式卡片 ===== */
     .modes {
       display: grid;
@@ -548,7 +553,7 @@
 
   <!-- 1. 用法 -->
   <h2 class="section"><span class="num">1</span> 用法 <span class="bar"></span></h2>
-  <div class="usage-cmd"><span class="k">/v[:模式]</span> <span class="ph">&lt;BID&gt;</span><span class="opt">[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--full] [--no-cache]</span>
+  <div class="usage-cmd"><span class="k">/v[:模式]</span> <span class="ph">&lt;BID&gt;</span><span class="opt">[+mod] [gap=&lt;BPM&gt;] [t=&lt;时间点&gt;] [--full] [--bg] [--no-cache]</span>
   </div>
 
   <!-- 2. 参数 -->
@@ -590,6 +595,10 @@
         <div class="desc">仅用于 <code>/vv</code>，关闭默认的 30 秒预览并渲染完整谱面；不能与视频 <code>t=</code> 同时使用。</div>
       </div>
       <div class="param">
+        <div class="name">--bg</div>
+        <div class="desc">在 MP4 中渲染谱面背景视频与故事板（默认关闭），仅对 <code>/vv</code> 生效，可与 <code>--full</code>、<code>--no-cache</code> 同时使用。</div>
+      </div>
+      <div class="param">
         <div class="name">--no-cache</div>
         <div class="desc">跳过下载缓存与输出缓存，强制重新下载谱面并重新渲染，可与 <code>--full</code> 同时使用。</div>
       </div>
@@ -600,40 +609,29 @@
   <h2 class="section"><span class="num">3</span> 示例 <span class="bar"></span></h2>
   <div class="examples">
     <div class="example"><span class="tag">基本</span>
-      <div class="cmd"><span class="k">/v</span> <span class="v">123456</span></div>
+      <div class="cmd"><span class="k">/v</span> <span class="v">123456</span><span class="sep">·</span><span
+          class="k">/v:3</span> <span class="v">123456</span><span class="sep">·</span><span class="k">/vg:3</span> <span
+          class="v">123456</span></div>
     </div>
-    <div class="example"><span class="tag">转谱</span>
-      <div class="cmd"><span class="k">/v:3</span> <span class="v">123456</span></div>
+    <div class="example"><span class="tag">Mod</span>
+      <div class="cmd"><span class="k">/v</span> <span class="v">123456+hd+hr</span></div>
     </div>
-    <div class="example"><span class="tag">强制GIF</span>
-      <div class="cmd"><span class="k">/vg:3</span> <span class="v">123456</span></div>
+    <div class="example"><span class="tag">时间</span>
+      <div class="cmd"><span class="k">/vg</span> <span class="v">123456 t=10+25+60</span><span class="sep">·</span><span
+          class="k">/vp:3</span> <span class="v">123456 t=30+60</span></div>
     </div>
-    <div class="example"><span class="tag">Mod组合</span>
-      <div class="cmd"><span class="k">/v</span> <span class="v">123456</span><span class="v">+hd+hr</span></div>
+    <div class="example"><span class="tag">视频</span>
+      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span><span class="sep">·</span><span
+          class="k">/vv</span> <span class="v">123456 t=30+60</span><span class="sep">·</span><span class="k">/vv</span>
+        <span class="v">123456 --full --bg</span></div>
     </div>
-    <div class="example"><span class="tag">时间点</span>
-      <div class="cmd"><span class="k">/vg</span> <span class="v">123456</span> <span class="v">t=10+25+60</span></div>
-    </div>
-    <div class="example"><span class="tag">PNG区间</span>
-      <div class="cmd"><span class="k">/vp:3</span> <span class="v">123456</span> <span class="v">t=30+60</span></div>
-    </div>
-    <div class="example"><span class="tag">视频片段</span>
-      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span> <span class="v">t=30+60</span></div>
-    </div>
-    <div class="example"><span class="tag">默认视频</span>
-      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span></div>
-    </div>
-    <div class="example"><span class="tag">完整视频</span>
-      <div class="cmd"><span class="k">/vv</span> <span class="v">123456</span> <span class="v">--full</span></div>
-    </div>
-    <div class="example"><span class="tag">GIF切片</span>
-      <div class="cmd"><span class="k">/vgc</span> <span class="v">123456</span></div>
-    </div>
-    <div class="example"><span class="tag">GIF标签</span>
-      <div class="cmd"><span class="k">/vgcl</span> <span class="v">123456</span> <span class="v">t=-2+10</span></div>
+    <div class="example"><span class="tag">GIF单屏</span>
+      <div class="cmd"><span class="k">/vgc</span> <span class="v">123456</span><span class="sep">·</span><span
+          class="k">/vgcl</span> <span class="v">123456 t=-2+10</span></div>
     </div>
     <div class="example"><span class="tag">复杂</span>
-      <div class="cmd"><span class="k">/vg:3</span> <span class="v">123456</span><span class="v">+4k+ds+in+dt1.2</span> <span class="v">t=10+30+50</span></div>
+      <div class="cmd"><span class="k">/vg:3</span> <span class="v">123456+4k+ds+in+dt1.2</span> <span
+          class="v">t=10+30+50</span></div>
     </div>
   </div>
 
@@ -654,15 +652,18 @@
           <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
-            <span class="chip accent">HD</span><span class="chip accent">DA</span>
-            <span class="chip accent">TC</span><span class="chip accent">DT</span><span class="chip accent">HT</span>
+            <span class="chip accent">HD</span><span class="chip accent">FL</span>
+            <span class="chip accent">DA</span><span class="chip accent">TC</span>
+            <span class="chip accent">DT</span><span class="chip accent">HT</span>
+            <span class="chip accent">NC</span><span class="chip accent">DC</span>
           </div>
         </div>
         <div class="fmt-row png">
           <div class="fmt-label"><span class="dot"></span>PNG 支持</div>
           <div class="chips">
             <span class="chip blue">EZ</span><span class="chip blue">HR</span>
-            <span class="chip blue">HD</span><span class="chip blue">DA</span><span class="chip blue">TC</span>
+            <span class="chip blue">HD</span><span class="chip blue">FL</span>
+            <span class="chip blue">DA</span><span class="chip blue">TC</span>
           </div>
         </div>
         <div class="mode-foot">可转谱为 Taiko / Catch / Mania 预览（<code
@@ -683,8 +684,10 @@
           <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
+            <span class="chip accent">HD</span><span class="chip accent">FL</span>
             <span class="chip accent">SW</span><span class="chip accent">CS</span>
             <span class="chip accent">DT</span><span class="chip accent">HT</span>
+            <span class="chip accent">NC</span><span class="chip accent">DC</span>
           </div>
         </div>
         <div class="fmt-row png">
@@ -710,7 +713,9 @@
           <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
             <span class="chip accent">EZ</span><span class="chip accent">HR</span>
+            <span class="chip accent">HD</span><span class="chip accent">FL</span>
             <span class="chip accent">DT</span><span class="chip accent">HT</span>
+            <span class="chip accent">NC</span><span class="chip accent">DC</span>
           </div>
         </div>
         <div class="fmt-row png">
@@ -735,7 +740,9 @@
         <div class="fmt-row gif">
           <div class="fmt-label"><span class="dot"></span>GIF / MP4 支持</div>
           <div class="chips">
+            <span class="chip accent">HD</span><span class="chip accent">FL</span>
             <span class="chip accent">CS</span><span class="chip accent">DT</span><span class="chip accent">HT</span>
+            <span class="chip accent">NC</span><span class="chip accent">DC</span>
             <span class="chip accent">1K–10K</span><span class="chip accent">DS</span><span
               class="chip accent">IN</span><span class="chip accent">HO</span>
           </div>
@@ -752,6 +759,22 @@
             style="background:#0a0d1c;padding:2px 5px;border-radius:4px;color:var(--blue2)">--convert=mania</code>
           时生效。默认 PNG 全谱面长图。</div>
       </div>
+    </div>
+  </div>
+
+  <div class="rules" style="margin-top:18px">
+    <div class="rule">
+      <div class="pair">DT / HT / NC / DC</div>
+      <div class="txt">四者<b>互斥</b>，倍速可带数值如 <code>+dt1.25</code>。<code>DT</code>/<code>HT</code> 保调变速（只变速不变调）；<code>NC</code>/<code>DC</code> 音乐音高固定为
+        <b>1.5x / 0.75x</b>，<code>NC</code> 叠加节拍鼓点。</div>
+    </div>
+    <div class="rule">
+      <div class="pair">EZ <span class="vs">/</span> HR <span class="vs">·</span> TC <span class="vs">/</span> HD <span class="vs">·</span> IN <span class="vs">/</span> HO</div>
+      <div class="txt">分别<b>互斥</b>；<code>DA</code> 仅 Standard 可用，且不能与 <code>EZ</code> 或 <code>HR</code> 同用。</div>
+    </div>
+    <div class="rule">
+      <div class="pair">HD <span class="vs">+</span> FL</div>
+      <div class="txt">Mania 的 <code>HD</code> 与 <code>FL</code> <b>互斥</b>，其余三模式可叠加；Catch 的 <code>HD</code> 在 Kiai 区段持续保留淡淡轮廓。</div>
     </div>
   </div>
 

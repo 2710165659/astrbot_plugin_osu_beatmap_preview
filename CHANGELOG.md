@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.x]
+
+### [0.4.0] - 2026-10-04
+
+同步上游 osu-beatmap-preview [v1.4.0](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.4.0)（含 v1.3.4）。
+
+#### 新增
+
+- 新增 `--bg` 命令后缀，在 MP4 中渲染背景视频与故事板。
+- Mod 支持同步上游：新增 `FL`、`HD`（Taiko / Catch / Mania）、`NC`、`DC`。
+- `default_json` 可覆盖 `ENABLE_BACKGROUND_VIDEO`、`ENABLE_STORYBOARD` 等 v1.4.0 新字段。
+
+#### 变更
+
+- 默认配置调整：Standard 改为 20 FPS，Taiko GIF 时长改为 10 秒。
+- `DT`/`HT` 改为保调变速。
+- `NC`/`DC` 音乐固定按 `1.5x`/`0.75x` 变调，`NC` 叠加节拍鼓点。
+
 ## [0.3.x]
 
 ### [0.3.0] - 2026-09-27

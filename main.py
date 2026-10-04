@@ -76,6 +76,7 @@ class PreviewRequest:
     duration_time: float | None
     taiko_gap: str | None
     no_cache: bool
+    bg: bool = False
     full_video: bool = False
     config_profile: str = "default"
     gif_duration_ms: int | None = None
@@ -89,7 +90,7 @@ class PreviewRequest:
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.3.0",
+    "0.4.0",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -183,6 +184,7 @@ class BeatmapPreviewPlugin(Star):
                             time_points=request.time_points,
                             duration_time=request.duration_time,
                             no_cache=request.no_cache,
+                            bg=request.bg,
                             config_profile=request.config_profile,
                             taiko_gap=request.taiko_gap,
                             gif_duration_ms=request.gif_duration_ms,
@@ -282,7 +284,7 @@ class BeatmapPreviewPlugin(Star):
 
         bid = bid_match.group(0)
         suffix = tail[bid_match.end():]
-        mod_text, time_text, gap_text, no_cache, full_video = self._parse_suffix(suffix)
+        mod_text, time_text, gap_text, no_cache, full_video, bg = self._parse_suffix(suffix)
         if full_video and fmt != "mp4":
             raise ValueError("--full 仅适用于 /vv 视频命令")
         if full_video and time_text is not None:
@@ -345,6 +347,7 @@ class BeatmapPreviewPlugin(Star):
             duration_time=duration_time,
             taiko_gap=taiko_gap,
             no_cache=no_cache,
+            bg=bg,
             full_video=full_video,
             config_profile=config_profile,
             gif_duration_ms=gif_duration_ms,
@@ -397,22 +400,26 @@ class BeatmapPreviewPlugin(Star):
     def _parse_suffix(
         self,
         raw_suffix: str,
-    ) -> tuple[str | None, str | None, str | None, bool, bool]:
+    ) -> tuple[str | None, str | None, str | None, bool, bool, bool]:
         normalized = re.sub(r"\s+", "", raw_suffix).lower()
         if not normalized:
-            return None, None, None, False, False
+            return None, None, None, False, False, False
 
-        # 独立解析尾部开关，允许 --full 与 --no-cache 以任意顺序组合。
+        # 独立解析尾部开关，允许 --full、--no-cache 与 --bg 以任意顺序组合。
         no_cache = False
         full_video = False
+        bg = False
         if "--no-cache" in normalized:
             no_cache = True
             normalized = normalized.replace("--no-cache", "")
         if "--full" in normalized:
             full_video = True
             normalized = normalized.replace("--full", "")
+        if "--bg" in normalized:
+            bg = True
+            normalized = normalized.replace("--bg", "")
         if not normalized:
-            return None, None, None, no_cache, full_video
+            return None, None, None, no_cache, full_video, bg
 
         gap_match = re.search(r"(?:gap|g)=", normalized)
         time_match = re.search(r"-?(?:time|t)=", normalized)
@@ -471,4 +478,4 @@ class BeatmapPreviewPlugin(Star):
             if not mod_text:
                 raise ValueError("命令格式不正确")
 
-        return mod_text, time_text, gap_text, no_cache, full_video
+        return mod_text, time_text, gap_text, no_cache, full_video, bg
