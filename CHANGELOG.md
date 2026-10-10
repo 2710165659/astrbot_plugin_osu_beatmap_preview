@@ -2,6 +2,26 @@
 
 ## [0.4.x]
 
+### [0.4.1] - 2026-10-11
+
+同步上游 osu-beatmap-preview [v1.4.1](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.4.1)，更新四个平台的 CLI 二进制文件。
+
+#### 新增
+
+- Standard 新增 `AT`（Autoplay），使用 `+at` 可显示自动光标。
+
+#### 变更
+
+- Standard 转盘改为 Argon 样式，移除休息段文字提示。
+- 优化极端滑条谱面、背景视频和故事板的渲染性能。
+- 清理 Git 历史中的旧 CLI 二进制文件，仅保留 v1.4.1，减小仓库体积。
+
+#### 修复
+
+- 修复部分滑条形状和滑条中途停顿效果错误。
+- 修复 Aspire 谱面的音频混合与音画不同步问题。
+- 修复 Taiko `HD` / `FL` 下音符颜色变灰，以及 `HD` 跳过滑条和转盘的问题。
+
 ### [0.4.0] - 2026-10-04
 
 同步上游 osu-beatmap-preview [v1.4.0](https://github.com/2710165659/osu-beatmap-preview/releases/tag/v1.4.0)（含 v1.3.4）。

@@ -2,7 +2,7 @@ name: astrbot_plugin_osu_beatmap_preview
 display_name: osu! 谱面预览
 author: xuan_yuan
 desc: osu! 谱面预览：按谱面 ID 生成四模式预览长图、GIF 与带原始音频的 MP4，支持 Mod、转谱、背景视频与故事板。
-version: 0.4.0
+version: 0.4.1
 repo: https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
 astrbot_version: ">=4.16,<5"
 support_platforms:
