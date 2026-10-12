@@ -1,4 +1,10 @@
 {
+  "core_repository": {
+    "description": "核心下载 GitHub 仓库",
+    "type": "string",
+    "hint": "使用 owner/repo 格式，默认下载最新 Release 的当前平台 CLI。替代核心需要兼容文件名、CLI 参数及 JSON 协议。",
+    "default": "2710165659/osu-beatmap-preview"
+  },
   "max_image_queue_length": {
     "description": "图片渲染队列最大长度",
     "type": "int",

@@ -9,3 +9,5 @@ target/
 *.swp
 .reasonix/
 .codegraph/
+# Downloaded platform cores stay local.
+bin/

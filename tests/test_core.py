@@ -1,0 +1,129 @@
+import logging
+import tempfile
+import threading
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import patch
+
+from service import core_download as download
+from service.core_config import CoreConfig
+from service.preview_request import parse_request
+from service.service_beatmap_preview import BeatmapPreviewService
+
+
+class CoreTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.asset = download._binary_names()[0]
+        self.target = self.root / "bin" / self.asset
+        self.target.parent.mkdir()
+
+    def test_official_then_mirror_and_atomic_replace(self):
+        self.target.write_bytes(b"old core")
+        sources = []
+
+        def fetch(url, temporary, asset):
+            sources.append(url)
+            self.assertEqual(self.target.read_bytes(), b"old core")
+            temporary.write_bytes(b"new core")
+            if len(sources) <= 2:
+                raise TimeoutError("offline")
+
+        with patch.object(download, "_download", side_effect=fetch), patch.object(
+            download, "_core_version", return_value="v1.4.1"
+        ), self.assertLogs(download.logger, logging.WARNING):
+            manager = download.CoreManager(self.root)
+            manager.ensure(force=True)
+        self.assertEqual(sources[:2], [sources[0]] * 2)
+        self.assertTrue(sources[2].startswith(download.MIRRORS[0]))
+        self.assertEqual(self.target.read_bytes(), b"new core")
+        self.assertEqual(manager.version, "v1.4.1")
+        self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+    def test_failure_preserves_old_core(self):
+        self.target.write_bytes(b"old core")
+        with patch.object(download, "_download", side_effect=ValueError("HTML")), self.assertLogs(
+            download.logger, logging.WARNING
+        ), self.assertRaises(RuntimeError):
+            download.CoreManager(self.root).ensure(force=True)
+        self.assertEqual(self.target.read_bytes(), b"old core")
+        self.assertEqual(list(self.target.parent.iterdir()), [self.target])
+
+    def test_concurrent_missing_core_downloads_once(self):
+        def fetch(repository, asset, target, access):
+            target.write_bytes(b"installed")
+            return "v1.4.1"
+
+        manager = download.CoreManager(self.root)
+        with patch.object(download, "download_core", side_effect=fetch) as mocked:
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                results = list(pool.map(lambda _: manager.ensure(), range(5)))
+        self.assertEqual(mocked.call_count, 1)
+        self.assertEqual(results, [self.target] * 5)
+
+    def test_replacement_waits_for_active_render(self):
+        access = download.CoreAccess()
+        acquired = threading.Event()
+        attempted = threading.Event()
+
+        def writer():
+            attempted.set()
+            with access.replace():
+                acquired.set()
+
+        with access.render():
+            thread = threading.Thread(target=writer)
+            thread.start()
+            self.assertTrue(attempted.wait(1))
+            self.assertFalse(acquired.is_set())
+        thread.join(1)
+        self.assertTrue(acquired.is_set())
+
+    def test_invalid_binary_rejected(self):
+        self.target.write_bytes(b"<html>error</html>" * 10)
+        with self.assertRaises(ValueError):
+            download._validate_binary(self.target, self.asset)
+
+    def test_manually_installed_core_gets_execute_permissions(self):
+        self.target.write_bytes(b"existing")
+        with patch.object(download.sys, "platform", "linux"), patch.object(
+            download.platform, "machine", return_value="x86_64"
+        ), patch.object(download.os, "chmod") as chmod:
+            path = self.target.parent / "osu-beatmap-preview-linux-amd64-cli"
+            path.write_bytes(b"manual core")
+            with patch.object(download.Path, "stat") as stat_result:
+                stat_result.return_value.st_mode = 0o644
+                # Stat mocking would hide is_file; verify the permission helper directly.
+                download._ensure_executable(path)
+            chmod.assert_called_once_with(path, 0o755)
+
+    def test_invalid_params_reach_cli(self):
+        self.target.write_bytes(b"existing")
+        request = parse_request("vv", "123+notamod t=30+-10")
+        service = BeatmapPreviewService(self.root)
+        args = service.build_args(request.bid, mods=request.mods,
+                                  time_points=request.time_points,
+                                  duration_time=request.duration_time)
+        self.assertIn("notamod", args)
+        self.assertIn("-40.0", args)
+        self.assertEqual(parse_request("vp", "123 t=-5+0").time_points, ("-5", "0"))
+        self.assertEqual(parse_request("vgc", "123 t=10+5").gif_duration_ms, -5000)
+        self.assertEqual(parse_request("vv", "123 t=bad+other").time_points, ("bad", "other"))
+
+    def test_configuration_is_live_and_does_not_mutate_source(self):
+        source = {"default_json": {"render": {"mania": {"gif": {"style": {"X": 1}}}}}}
+        loader = CoreConfig(source)
+        output = loader.build("vgcl", gif_duration_ms=2000)
+        style = output["render"]["mania"]["gif"]["style"]
+        self.assertTrue(style["SHOW_TIME_LABEL"])
+        self.assertEqual(style["DURATION_MS"], 2000)
+        self.assertEqual(source["default_json"]["render"]["mania"]["gif"]["style"], {"X": 1})
+        source["default_json"] = '{"timeout":{"PNG_TIMEOUT":12}}'
+        self.assertEqual(loader.build("default")["timeout"]["PNG_TIMEOUT"], 12)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 import astrbot.api.message_components as Comp
@@ -21,6 +20,7 @@ if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
 from service.service_beatmap_preview import BeatmapPreviewService
+from service.preview_request import parse_request
 
 V_REQUEST_RE = re.compile(
     r"^\s*/(?P<command>预览|vgcl|vgc|vv|vp|vg|v)(?P<tail>.*)\s*$",
@@ -29,68 +29,14 @@ V_REQUEST_RE = re.compile(
 
 HELP_IMG = PLUGIN_ROOT / "help.png"
 
-COMMAND_TO_FMT = {
-    "v": None,
-    "vp": "png",
-    "vg": "gif",
-    "vgc": "gif",
-    "vgcl": "gif",
-    "vv": "mp4",
-    "预览": None,
-}
-
-CONVERT_ALIAS_TO_TARGET = {
-    "1": "taiko",
-    "t": "taiko",
-    "taiko": "taiko",
-    "2": "ctb",
-    "c": "ctb",
-    "ctb": "ctb",
-    "catch": "ctb",
-    "3": "mania",
-    "m": "mania",
-    "mania": "mania",
-}
-
-TEXT_CONVERT_ALIASES = (
-    "taiko",
-    "catch",
-    "mania",
-    "ctb",
-    "t",
-    "c",
-    "m",
-)
 PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
-
-
-@dataclass(frozen=True)
-class PreviewRequest:
-    """解析后的聊天请求，避免在新增模式时扩展位置元组。"""
-
-    bid: str | None
-    fmt: str | None
-    convert: str | None
-    mods: tuple[str, ...]
-    time_points: tuple[str, ...]
-    duration_time: float | None
-    taiko_gap: str | None
-    no_cache: bool
-    bg: bool = False
-    full_video: bool = False
-    config_profile: str = "default"
-    gif_duration_ms: int | None = None
-    # 原生谱面的目标模式未知时，t=a+b 先按两个时间点渲染；
-    # 核心判定为 Taiko/Catch/Mania PNG 区间段时用该回退参数改渲染 [a, b]。
-    fallback_time_points: tuple[str, ...] = ()
-    fallback_duration_time: float | None = None
 
 
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.4.1",
+    "0.5.0",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -113,6 +59,31 @@ class BeatmapPreviewPlugin(Star):
         self._image_queue_size = 0
         self._video_queue_lock = asyncio.Lock()
         self._video_queue_size = 0
+        self._core_download_task: asyncio.Task | None = None
+
+    async def initialize(self) -> None:
+        """AstrBot calls this after installation, load and reload; don't block it."""
+        self._start_core_download(force=True)
+
+    async def _download_core(self, *, force: bool) -> Path:
+        start = time.monotonic()
+        path = await asyncio.to_thread(self.preview_service.ensure_core, force=force)
+        version = self.preview_service.core.version
+        logger.info(f"核心更新成功：{version}，耗时 {time.monotonic() - start:.1f} s")
+        return path
+
+    def _start_core_download(self, *, force: bool = False) -> asyncio.Task:
+        if self._core_download_task is None or self._core_download_task.done():
+            self._core_download_task = asyncio.create_task(
+                self._download_core(force=force)
+            )
+            self._core_download_task.add_done_callback(self._log_core_download)
+        return self._core_download_task
+
+    @staticmethod
+    def _log_core_download(task: asyncio.Task) -> None:
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logger.error(f"核心下载/更新失败：{error}")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def preview_beatmap(self, event: AstrMessageEvent):
@@ -123,20 +94,41 @@ class BeatmapPreviewPlugin(Star):
         if not matched:
             return
 
+        if matched.group("command").lower() == "v" and matched.group("tail").strip().lower() == "update":
+            task = self._start_core_download(force=True)
+            yield self._reply_text(event, "核心正在更新，完成前仍可使用旧核心" if self.preview_service.has_core() else "核心正在下载")
+            try:
+                await asyncio.shield(task)
+            except Exception as exc:
+                yield self._reply_text(event, f"核心更新失败：{exc}")
+            else:
+                version = self.preview_service.core.version
+                yield self._reply_text(event, f"核心已更新至 {version}")
+            return
+
+        core_missing = not self.preview_service.has_core()
+        if core_missing:
+            self._start_core_download()
+
         try:
-            request = self._parse_request(
+            request = parse_request(
                 command=matched.group("command"),
                 raw_tail=matched.group("tail"),
             )
         except ValueError as exc:
-            yield self._reply_text(event, str(exc))
+            yield self._reply_text(event, str(exc) + ("\n核心正在下载" if core_missing else ""))
             return
 
         if request.bid is None:
             yield event.chain_result([
                 Comp.Reply(id=event.message_obj.message_id),
                 Comp.Image.fromFileSystem(str(HELP_IMG)),
+                *([Comp.Plain(text="核心正在下载")] if core_missing else []),
             ])
+            return
+
+        if core_missing:
+            yield self._reply_text(event, "暂时无法渲染谱面，核心正在下载，请稍后重新发送命令")
             return
 
         is_video = request.fmt == "mp4"
@@ -188,8 +180,6 @@ class BeatmapPreviewPlugin(Star):
                             config_profile=request.config_profile,
                             taiko_gap=request.taiko_gap,
                             gif_duration_ms=request.gif_duration_ms,
-                            fallback_time_points=request.fallback_time_points,
-                            fallback_duration_time=request.fallback_duration_time,
                             timeout=timeout_seconds,
                         ),
                         timeout=timeout_seconds,
@@ -250,232 +240,3 @@ class BeatmapPreviewPlugin(Star):
     @staticmethod
     def _encode_video_base64(path: str) -> str:
         return base64.b64encode(Path(path).read_bytes()).decode("ascii")
-
-    def _parse_request(
-        self,
-        command: str,
-        raw_tail: str,
-    ) -> PreviewRequest:
-        command_key = command.lower()
-        fmt = COMMAND_TO_FMT[command_key]
-        config_profile = command_key if command_key in {"vgc", "vgcl"} else "default"
-        tail = raw_tail.strip()
-        if not tail:
-            return PreviewRequest(
-                bid=None,
-                fmt=fmt,
-                convert=None,
-                mods=(),
-                time_points=(),
-                duration_time=None,
-                taiko_gap=None,
-                no_cache=False,
-                config_profile=config_profile,
-            )
-
-        convert = None
-        if tail.startswith((":", "：")):
-            convert, tail = self._parse_convert_spec(tail[1:].lstrip())
-
-        tail = tail.lstrip()
-        bid_match = re.match(r"^[^+\s]+", tail)
-        if bid_match is None:
-            raise ValueError("命令格式不正确")
-
-        bid = bid_match.group(0)
-        suffix = tail[bid_match.end():]
-        mod_text, time_text, gap_text, no_cache, full_video, bg = self._parse_suffix(suffix)
-        if full_video and fmt != "mp4":
-            raise ValueError("--full 仅适用于 /vv 视频命令")
-        if full_video and time_text is not None:
-            raise ValueError("--full 不能与视频时间范围同时使用")
-
-        mods = self._parse_mods(mod_text)
-        taiko_gap = self._parse_gap(gap_text)
-        time_points: tuple[str, ...] = ()
-        duration_time = None
-        gif_duration_ms = None
-        fallback_time_points: tuple[str, ...] = ()
-        fallback_duration_time = None
-        if time_text is not None:
-            parsed_times = self._parse_time_points(time_text)
-            if fmt == "mp4":
-                start, duration_time = self._parse_time_range(
-                    parsed_times,
-                    "视频时间范围需要两个时间点，例如：t=30+60",
-                )
-                time_points = (start,)
-            elif config_profile in {"vgc", "vgcl"}:
-                start, duration = self._parse_time_range(
-                    parsed_times,
-                    "GIF 单屏模式的时间范围需要两个时间点，例如：t=30+40",
-                )
-                time_points = (start,)
-                gif_duration_ms = round(duration * 1000)
-                if gif_duration_ms <= 0:
-                    raise ValueError("GIF 单屏模式的时间范围至少需要 0.001 秒")
-            elif convert is not None and fmt in (None, "png"):
-                # Taiko/Catch/Mania PNG 的区间段渲染：t=a+b 表示渲染 [a, b]。
-                start, duration = self._parse_time_range(
-                    parsed_times,
-                    "Taiko/Catch/Mania PNG 的区间渲染需要两个时间点，例如：t=30+60",
-                )
-                time_points = (start,)
-                duration_time = duration
-            else:
-                time_points = tuple(parsed_times)
-                if fmt in (None, "png") and len(parsed_times) == 2:
-                    # 原生谱面的目标模式要等核心解析后才知道：
-                    # 先按两个时间点渲染，核心判定为 Taiko/Catch/Mania PNG
-                    # （区间段输出只接受一个时间点）时改用 [a, b] 区间重试。
-                    start, duration = self._parse_time_range(
-                        parsed_times,
-                        "时间范围需要两个时间点，例如：t=30+60",
-                    )
-                    fallback_time_points = (start,)
-                    fallback_duration_time = duration
-        elif fmt == "mp4" and not full_video:
-            time_points = ("preview",)
-            duration_time = 30.0
-
-        return PreviewRequest(
-            bid=bid,
-            fmt=fmt,
-            convert=convert,
-            mods=mods,
-            time_points=time_points,
-            duration_time=duration_time,
-            taiko_gap=taiko_gap,
-            no_cache=no_cache,
-            bg=bg,
-            full_video=full_video,
-            config_profile=config_profile,
-            gif_duration_ms=gif_duration_ms,
-            fallback_time_points=fallback_time_points,
-            fallback_duration_time=fallback_duration_time,
-        )
-
-    @staticmethod
-    def _parse_mods(mod_text: str | None) -> tuple[str, ...]:
-        if mod_text is None:
-            return ()
-        return tuple(mod_text.split("+"))
-
-    @staticmethod
-    def _parse_gap(gap_text: str | None) -> str | None:
-        return gap_text
-
-    @staticmethod
-    def _parse_time_points(time_text: str) -> tuple[str, ...]:
-        return tuple(time_text.split("+"))
-
-    @staticmethod
-    def _parse_time_range(
-        time_points: tuple[str, ...],
-        count_error: str,
-    ) -> tuple[str, float]:
-        if len(time_points) != 2:
-            raise ValueError(count_error)
-        start = float(time_points[0])
-        end = float(time_points[1])
-        return time_points[0], end - start
-
-    def _parse_convert_spec(self, raw_spec: str) -> tuple[str, str]:
-        if not raw_spec:
-            raise ValueError("命令格式不正确")
-
-        lowered = raw_spec.lower()
-        for alias in TEXT_CONVERT_ALIASES:
-            if lowered.startswith(alias):
-                return CONVERT_ALIAS_TO_TARGET[alias], raw_spec[len(alias):]
-
-        numeric_alias = lowered[0]
-        if numeric_alias in {"1", "2", "3"}:
-            if len(raw_spec) == 1 or raw_spec[1].isdigit():
-                raise ValueError("命令格式不正确")
-            return CONVERT_ALIAS_TO_TARGET[numeric_alias], raw_spec[1:]
-
-        raise ValueError("命令格式不正确")
-
-    def _parse_suffix(
-        self,
-        raw_suffix: str,
-    ) -> tuple[str | None, str | None, str | None, bool, bool, bool]:
-        normalized = re.sub(r"\s+", "", raw_suffix).lower()
-        if not normalized:
-            return None, None, None, False, False, False
-
-        # 独立解析尾部开关，允许 --full、--no-cache 与 --bg 以任意顺序组合。
-        no_cache = False
-        full_video = False
-        bg = False
-        if "--no-cache" in normalized:
-            no_cache = True
-            normalized = normalized.replace("--no-cache", "")
-        if "--full" in normalized:
-            full_video = True
-            normalized = normalized.replace("--full", "")
-        if "--bg" in normalized:
-            bg = True
-            normalized = normalized.replace("--bg", "")
-        if not normalized:
-            return None, None, None, no_cache, full_video, bg
-
-        gap_match = re.search(r"(?:gap|g)=", normalized)
-        time_match = re.search(r"-?(?:time|t)=", normalized)
-
-        # mod_part 截止于第一个 = 参数之前
-        cut = len(normalized)
-        if gap_match is not None:
-            cut = min(cut, gap_match.start())
-        if time_match is not None:
-            cut = min(cut, time_match.start())
-
-        mod_part = normalized[:cut]
-        param_part = normalized[cut:]
-
-        # 依次解析 param_part 中的 gap=/g= 和 t=/time=
-        gap_text = None
-        time_text = None
-        pos = 0
-        while pos < len(param_part):
-            m_gap = re.match(r"(?:gap|g)=", param_part[pos:])
-            m_time = re.match(r"-?(?:time|t)=", param_part[pos:])
-            if m_gap:
-                pos += m_gap.end()
-                n_gap = re.search(r"(?:gap|g)=", param_part[pos:])
-                n_time = re.search(r"-?(?:time|t)=", param_part[pos:])
-                end = len(param_part)
-                if n_gap is not None:
-                    end = min(end, pos + n_gap.start())
-                if n_time is not None:
-                    end = min(end, pos + n_time.start())
-                gap_text = param_part[pos:end]
-                pos = end
-                if not gap_text:
-                    raise ValueError("命令格式不正确")
-            elif m_time:
-                pos += m_time.end()
-                n_gap = re.search(r"(?:gap|g)=", param_part[pos:])
-                n_time = re.search(r"-?(?:time|t)=", param_part[pos:])
-                end = len(param_part)
-                if n_gap is not None:
-                    end = min(end, pos + n_gap.start())
-                if n_time is not None:
-                    end = min(end, pos + n_time.start())
-                time_text = param_part[pos:end]
-                pos = end
-                if not time_text:
-                    raise ValueError("命令格式不正确")
-            else:
-                raise ValueError("命令格式不正确")
-
-        mod_text = None
-        if mod_part:
-            if not mod_part.startswith("+") or mod_part.endswith("+"):
-                raise ValueError("命令格式不正确")
-            mod_text = mod_part[1:]
-            if not mod_text:
-                raise ValueError("命令格式不正确")
-
-        return mod_text, time_text, gap_text, no_cache, full_video, bg

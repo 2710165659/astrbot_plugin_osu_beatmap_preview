@@ -1,206 +1,53 @@
 from __future__ import annotations
 
-import copy
 import json
-import os
-import platform
-import stat
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-CONFIG_PROFILE_KEYS = {
-    "default": ("default_json",),
-    "vgc": ("default_json",),
-    "vgcl": ("default_json",),
-}
-GIF_MODES = ("standard", "taiko", "catch", "mania")
+from service.core_config import CoreConfig
+from service.core_download import CoreManager
+
 PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
-# 核心对 Taiko/Catch/Mania PNG 的区间段输出只接受一个 --time-points。
-# 原生谱面的目标模式只有核心解析后才知道，靠这条报错把 t=a+b
-# 从「两个时间点」回退改判为 [a, b] 区间渲染。
-SEGMENT_PNG_TIME_POINT_LIMIT_ERROR = "accepts at most one --time-points value"
-VGC_CONFIG = {
-    "render": {
-        "standard": {"gif": {"structure": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
-        "taiko": {"gif": {"structure": {"ROW_COUNT": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
-        "catch": {"gif": {"structure": {"ROW_COUNT": 1, "IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "DURATION_MS": 10000}}},
-        "mania": {"gif": {"structure": {"IMAGES_PER_ROW": 1}, "style": {"SHOW_TIME_LABEL": False, "SHOW_SV_LABEL": False, "DURATION_MS": 10000}}},
-    }
-}
-VGCL_CONFIG = {
-    "render": {
-        mode: {"gif": {"style": {"SHOW_TIME_LABEL": True}}}
-        for mode in GIF_MODES
-    }
-}
-# --bg：渲染背景视频与故事板（上游 v1.4.0 起四模式 mp4 各带这两个开关，默认关闭）。
-BG_CONFIG = {
-    "render": {
-        mode: {
-            "mp4": {
-                "style": {
-                    "ENABLE_BACKGROUND_VIDEO": True,
-                    "ENABLE_STORYBOARD": True,
-                }
-            }
-        }
-        for mode in GIF_MODES
-    }
-}
-
-
-def _binary_names() -> tuple[str, ...]:
-    """当前平台可能的二进制文件名，按优先级排列。
-
-    上游自 1.2.0 起改为 Cargo workspace，CLI 产物名从 `osu-beatmap-preview-*`
-    变成 `osu-beatmap-preview-*-cli`；这里同时接受两种命名，旧核心目录无需改名也能继续使用。
-    """
-    system = sys.platform
-    machine = platform.machine().lower()
-
-    if system == "win32":
-        stem = "osu-beatmap-preview-windows-amd64"
-    elif system == "darwin":
-        stem = (
-            "osu-beatmap-preview-macos-arm64"
-            if machine == "arm64"
-            else "osu-beatmap-preview-macos-amd64"
-        )
-    elif system == "linux":
-        stem = "osu-beatmap-preview-linux-amd64"
-    else:
-        raise Exception(f"不支持的平台: {system}")
-
-    suffix = ".exe" if system == "win32" else ""
-    return (f"{stem}-cli{suffix}", f"{stem}{suffix}")
-
-
-def _detect_binary_path(plugin_root: Path) -> Path:
-    """Detect the platform and return the path to the appropriate binary."""
-    bin_dir = plugin_root / "bin"
-    candidates = [bin_dir / name for name in _binary_names()]
-
-    for binary_path in candidates:
-        if binary_path.exists():
-            return binary_path
-
-    expected = "\n".join(f"  - {path.name}" for path in candidates)
-    raise Exception(
-        f"核心二进制文件不存在，已尝试以下文件名:\n{expected}\n"
-        f"查找目录: {bin_dir}\n"
-        f"请运行 update_core.bat 下载最新核心"
-    )
-
-
-def _ensure_executable(binary_path: Path) -> None:
-    """On Unix-like systems, ensure the binary has execute permission."""
-    if sys.platform == "win32":
-        return
-
-    current_mode = binary_path.stat().st_mode
-    if not (current_mode & stat.S_IXUSR):
-        try:
-            os.chmod(binary_path, current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-        except OSError:
-            # Let subprocess report a clearer permission error if chmod is unavailable.
-            pass
-
-
-def _deep_merge(base: dict[str, Any], overlay: Mapping[str, Any]) -> None:
-    for key, value in overlay.items():
-        current = base.get(key)
-        if isinstance(current, dict) and isinstance(value, Mapping):
-            _deep_merge(current, value)
-        else:
-            base[key] = copy.deepcopy(value)
 
 
 class BeatmapPreviewService:
     """通过调用 Rust 二进制文件生成 osu! 谱面预览图和视频。"""
 
     def __init__(self, plugin_root: Path, config: Mapping[str, Any] | None = None) -> None:
-        self.plugin_root = plugin_root
-        # Keep the AstrBot config object, not a copied snapshot.  AstrBot may
-        # update this object when plugin settings are edited; reading it for
-        # every request makes JSON changes effective immediately.
-        self.config = config
-        self._binary_path: Path | None = None
+        self.core = CoreManager(plugin_root, config)
+        self.config_loader = CoreConfig(config)
+
+    def has_core(self) -> bool:
+        return self.core.has_core()
+
+    def ensure_core(self, *, force: bool = False) -> Path:
+        return self.core.ensure(force=force)
 
     @property
     def binary_path(self) -> Path:
-        if self._binary_path is None:
-            self._binary_path = _detect_binary_path(self.plugin_root)
-            _ensure_executable(self._binary_path)
-        return self._binary_path
+        return self.core.path
 
     def generate_from_bid(
-        self,
-        bid: str,
-        *,
-        fmt: str | None = None,
-        convert: str | None = None,
-        mods: Sequence[str] = (),
-        time_points: Sequence[str] = (),
-        duration_time: float | None = None,
-        no_cache: bool = False,
-        bg: bool = False,
-        config_profile: str = "default",
-        taiko_gap: str | float | None = None,
-        gif_duration_ms: int | None = None,
-        fallback_time_points: Sequence[str] = (),
-        fallback_duration_time: float | None = None,
-        timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS,
+        self, bid: str, *, timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS, **options: Any
     ) -> dict[str, Any]:
-        shared = dict(
-            fmt=fmt,
-            convert=convert,
-            mods=mods,
-            no_cache=no_cache,
-            bg=bg,
-            config_profile=config_profile,
-            taiko_gap=taiko_gap,
-            gif_duration_ms=gif_duration_ms,
-        )
-        args = self.build_args(
-            bid,
-            time_points=time_points,
-            duration_time=duration_time,
-            **shared,
-        )
-        try:
-            return self._render(args, timeout)
-        except Exception as exc:
-            if not fallback_time_points or SEGMENT_PNG_TIME_POINT_LIMIT_ERROR not in str(exc):
-                raise
-
-        # 原生 Taiko/Catch/Mania 谱面的 PNG 区间段：把 t=a+b 按 [a, b] 重试一次。
-        args = self.build_args(
-            bid,
-            time_points=fallback_time_points,
-            duration_time=fallback_duration_time,
-            **shared,
-        )
-        return self._render(args, timeout)
+        return self._render(self.build_args(bid, **options), timeout)
 
     def _render(self, args: list[str], timeout: int) -> dict[str, Any]:
         try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
+            with self.core._execution_lock.render():
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                )
         except subprocess.TimeoutExpired:
             raise TimeoutError("预览生成超时，请稍后再试")
         except (FileNotFoundError, PermissionError) as exc:
-            hint = ""
-            if sys.platform != "win32":
-                hint = f"\n如果刚下载了核心，请运行 chmod +x {self.binary_path} 赋予执行权限"
-            raise Exception(f"无法执行核心二进制文件: {self.binary_path}\n{exc}{hint}")
+            raise Exception(f"无法执行核心二进制文件: {self.binary_path}\n{exc}")
 
         payload = self._parse_process_result(result)
         preview_img = payload.get("preview-img", "")
@@ -225,7 +72,7 @@ class BeatmapPreviewService:
     ) -> list[str]:
         bid = bid.strip()
         args = [str(self.binary_path), "--bid", bid]
-        if convert:
+        if convert is not None:
             args += ["--convert", convert]
         if fmt:
             args += ["--fmt", fmt]
@@ -240,7 +87,7 @@ class BeatmapPreviewService:
         if no_cache:
             args.append("--no-cache")
 
-        config = self.build_config(
+        config = self.config_loader.build(
             config_profile,
             taiko_gap=taiko_gap,
             gif_duration_ms=gif_duration_ms,
@@ -251,73 +98,6 @@ class BeatmapPreviewService:
             json.dumps(config, ensure_ascii=False, separators=(",", ":")),
         ]
         return args
-
-    def build_config(
-        self,
-        profile: str,
-        *,
-        taiko_gap: str | float | None = None,
-        gif_duration_ms: int | None = None,
-        bg: bool = False,
-    ) -> dict[str, Any]:
-        try:
-            config_keys = CONFIG_PROFILE_KEYS[profile]
-        except KeyError:
-            raise ValueError(f"未知配置 profile: {profile}") from None
-
-        merged: dict[str, Any] = {}
-        for key in config_keys:
-            loaded = self._load_config_document(key)
-            if loaded is None:
-                continue
-            if not isinstance(loaded, Mapping):
-                raise ValueError(f"配置项顶层必须是对象: {key}")
-            _deep_merge(merged, loaded)
-
-        if profile == "vgc":
-            _deep_merge(merged, VGC_CONFIG)
-        elif profile == "vgcl":
-            _deep_merge(merged, VGC_CONFIG)
-            _deep_merge(merged, VGCL_CONFIG)
-
-        if taiko_gap is not None:
-            _deep_merge(
-                merged,
-                {"render": {"taiko": {"png": {"style": {"SPACING_PER_BPM": taiko_gap}}}}},
-            )
-        if gif_duration_ms is not None:
-            for mode in GIF_MODES:
-                _deep_merge(
-                    merged,
-                    {"render": {mode: {"gif": {"style": {"DURATION_MS": gif_duration_ms}}}}},
-                )
-        if bg:
-            # --bg 开启背景视频与故事板渲染，覆盖 default_json 中的同名开关。
-            _deep_merge(merged, BG_CONFIG)
-        return merged
-
-    def _load_config_document(self, key: str) -> Any:
-        """Load a JSON document from the current AstrBot settings."""
-        sentinel = object()
-        raw: Any = sentinel
-        if self.config is not None and key is not None:
-            getter = getattr(self.config, "get", None)
-            if getter is not None:
-                raw = getter(key, sentinel)
-
-        if raw is sentinel:
-            return None
-
-        if isinstance(raw, Mapping):
-            return raw
-        if raw is None or (isinstance(raw, str) and not raw.strip()):
-            return None
-        if not isinstance(raw, str):
-            raise ValueError(f"配置项 {key} 必须是 JSON 文本")
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"配置项 {key} JSON 格式错误: {exc}") from exc
 
     @staticmethod
     def _parse_process_result(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
