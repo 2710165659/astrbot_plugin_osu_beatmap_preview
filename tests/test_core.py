@@ -20,6 +20,12 @@ class CoreTests(unittest.TestCase):
         self.asset = download._binary_names()[0]
         self.target = self.root / "bin" / self.asset
         self.target.parent.mkdir()
+        tag_patch = patch.object(download, "latest_release_tag", return_value="v1.4.1")
+        tag_patch.start()
+        self.addCleanup(tag_patch.stop)
+        version_patch = patch.object(download, "_core_version", return_value="v1.4.0")
+        version_patch.start()
+        self.addCleanup(version_patch.stop)
 
     def test_official_then_mirror_and_atomic_replace(self):
         self.target.write_bytes(b"old core")
@@ -33,7 +39,8 @@ class CoreTests(unittest.TestCase):
                 raise TimeoutError("offline")
 
         with patch.object(download, "_download", side_effect=fetch), patch.object(
-            download, "_core_version", return_value="v1.4.1"
+            download, "_core_version",
+            side_effect=lambda path: "v1.4.0" if path == self.target else "v1.4.1",
         ), self.assertLogs(download.logger, logging.WARNING):
             manager = download.CoreManager(self.root)
             manager.ensure(force=True)
@@ -41,6 +48,7 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(sources[2].startswith(download.MIRRORS[0]))
         self.assertEqual(self.target.read_bytes(), b"new core")
         self.assertEqual(manager.version, "v1.4.1")
+        self.assertIn("/releases/download/v1.4.1/", sources[0])
         self.assertEqual(list(self.target.parent.iterdir()), [self.target])
 
     def test_failure_preserves_old_core(self):
@@ -53,7 +61,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(list(self.target.parent.iterdir()), [self.target])
 
     def test_concurrent_missing_core_downloads_once(self):
-        def fetch(repository, asset, target, access):
+        def fetch(repository, asset, target, access, *, tag):
             target.write_bytes(b"installed")
             return "v1.4.1"
 
@@ -63,6 +71,106 @@ class CoreTests(unittest.TestCase):
                 results = list(pool.map(lambda _: manager.ensure(), range(5)))
         self.assertEqual(mocked.call_count, 1)
         self.assertEqual(results, [self.target] * 5)
+
+    def test_same_tag_skips_download_and_preserves_mtime(self):
+        self.target.write_bytes(b"existing core")
+        before = self.target.stat().st_mtime_ns
+        with patch.object(download, "_core_version", return_value="v1.4.1"), patch.object(
+            download, "download_core"
+        ) as fetch:
+            manager = download.CoreManager(self.root)
+            self.assertEqual(manager.ensure(force=True), self.target)
+        fetch.assert_not_called()
+        self.assertEqual(manager.version, "v1.4.1")
+        self.assertEqual(self.target.stat().st_mtime_ns, before)
+
+    def test_render_can_use_old_core_during_download(self):
+        self.target.write_bytes(b"existing core")
+        downloading = threading.Event()
+        release = threading.Event()
+        manager = download.CoreManager(self.root)
+
+        def fetch(*args, **kwargs):
+            downloading.set()
+            if not release.wait(3):
+                raise TimeoutError("test download timed out")
+            return "v1.4.1"
+
+        with patch.object(download, "download_core", side_effect=fetch):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                update = pool.submit(manager.ensure, force=True)
+                try:
+                    self.assertTrue(downloading.wait(1))
+                    self.assertEqual(pool.submit(lambda: manager.path).result(1), self.target)
+                finally:
+                    release.set()
+                update.result(1)
+
+    def test_pending_replacement_allows_new_render(self):
+        access = download.CoreAccess()
+        waiting = threading.Event()
+        acquired = threading.Event()
+        original_wait = access.condition.wait_for
+
+        def wait(predicate):
+            waiting.set()
+            return original_wait(predicate)
+
+        def writer():
+            with access.replace():
+                acquired.set()
+
+        def render():
+            with access.render():
+                return True
+
+        with patch.object(access.condition, "wait_for", side_effect=wait):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                with access.render():
+                    update = pool.submit(writer)
+                    self.assertTrue(waiting.wait(1))
+                    self.assertTrue(pool.submit(render).result(1))
+                    self.assertFalse(acquired.is_set())
+                update.result(1)
+        self.assertTrue(acquired.is_set())
+
+    def test_download_goes_to_data_dir_with_legacy_fallback(self):
+        self.target.write_bytes(b"legacy core")
+        data_dir = self.root / "plugin_data"
+        manager = download.CoreManager(self.root, data_dir=data_dir)
+        self.assertEqual(manager.path, self.target)
+
+        def fetch(repository, asset, target, access, *, tag):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"new core")
+            return "v1.4.1"
+
+        with patch.object(download, "download_core", side_effect=fetch):
+            target = manager.ensure(force=True)
+        self.assertEqual(target, data_dir / "bin" / self.asset)
+        self.assertEqual(manager.path, target)
+        self.assertEqual(self.target.read_bytes(), b"legacy core")
+
+    def test_wrong_release_version_is_not_installed(self):
+        self.target.write_bytes(b"old core")
+
+        def fetch(url, temporary, asset):
+            temporary.write_bytes(b"wrong release")
+
+        with patch.object(download, "_download", side_effect=fetch), self.assertLogs(
+            download.logger, logging.WARNING
+        ), self.assertRaises(RuntimeError):
+            download.CoreManager(self.root).ensure(force=True)
+        self.assertEqual(self.target.read_bytes(), b"old core")
+
+    def test_tag_check_failure_preserves_old_core(self):
+        self.target.write_bytes(b"old core")
+        with patch.object(download, "latest_release_tag", side_effect=RuntimeError("offline")), patch.object(
+            download, "download_core"
+        ) as fetch, self.assertRaisesRegex(RuntimeError, "offline"):
+            download.CoreManager(self.root).ensure(force=True)
+        fetch.assert_not_called()
+        self.assertEqual(self.target.read_bytes(), b"old core")
 
     def test_replacement_waits_for_active_render(self):
         access = download.CoreAccess()

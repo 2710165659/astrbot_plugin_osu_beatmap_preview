@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from urllib.parse import quote, unquote, urlsplit
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Condition
@@ -29,17 +30,15 @@ MAX_BYTES = 512 * 1024 * 1024
 
 
 class CoreAccess:
-    """Allow simultaneous renders, but wait for all of them before replacement."""
+    """旧核心在等待替换期间仍可接收渲染，仅原子替换时独占访问。"""
 
     def __init__(self):
         self.condition = Condition()
         self.readers = 0
-        self.writers = 0
 
     @contextmanager
     def render(self):
         with self.condition:
-            self.condition.wait_for(lambda: self.writers == 0)
             self.readers += 1
         try:
             yield
@@ -51,13 +50,9 @@ class CoreAccess:
     @contextmanager
     def replace(self):
         with self.condition:
-            self.writers += 1
             self.condition.wait_for(lambda: self.readers == 0)
-            try:
-                yield
-            finally:
-                self.writers -= 1
-                self.condition.notify_all()
+            # wait_for 会释放锁；新请求可以继续用旧核心，替换本身才持锁。
+            yield
 
 
 def _validate_binary(path: Path, asset: str) -> None:
@@ -133,10 +128,41 @@ def _core_version(path: Path) -> str:
     return "v" + matched[1]
 
 
-def download_core(repository: str, asset: str, target: Path, access: CoreAccess) -> str:
+def latest_release_tag(repository: str) -> str:
+    """通过 Release 跳转读取 tag，不下载二进制，也不消耗 GitHub API 配额。"""
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("core_repository 必须是 GitHub 的 owner/repo")
-    official = f"https://github.com/{repository}/releases/latest/download/{asset}"
+    official = f"https://github.com/{repository}/releases/latest"
+    errors = []
+    for url in (official, official, *(prefix + official for prefix in MIRRORS)):
+        try:
+            request = urllib.request.Request(url, method="HEAD", headers={
+                "User-Agent": "astrbot-osu-beatmap-preview/0.5.0",
+            })
+            with urllib.request.urlopen(request, timeout=SOCKET_TIMEOUT) as response:
+                path = urlsplit(response.geturl()).path
+                prefix = f"/{repository}/releases/tag/"
+                if response.status != 200 or prefix not in path:
+                    raise ValueError("无法从 Release 跳转读取版本 tag")
+                tag = unquote(path.split(prefix, 1)[1])
+                if not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?", tag):
+                    raise ValueError(f"不支持的核心版本 tag：{tag}")
+                return tag
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+            logger.warning("核心版本检查来源失败: %s: %s", url, exc)
+    raise RuntimeError("核心版本检查失败，保留现有核心。\n" + "\n".join(errors))
+
+
+def download_core(
+    repository: str, asset: str, target: Path, access: CoreAccess, *, tag: str | None = None
+) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ValueError("core_repository 必须是 GitHub 的 owner/repo")
+    if tag is None:
+        tag = latest_release_tag(repository)
+    # 固定刚检查的 tag，避免检查和下载期间 latest 变化，或镜像返回旧版本。
+    official = f"https://github.com/{repository}/releases/download/{quote(tag, safe='')}/{asset}"
     target.parent.mkdir(parents=True, exist_ok=True)
     errors = []
     # Retry the official source once, then try each independent mirror.
@@ -152,6 +178,8 @@ def download_core(repository: str, asset: str, target: Path, access: CoreAccess)
                 if os.name != "nt":
                     temporary.chmod(0o755)
                 version = _core_version(temporary)
+                if version != "v" + tag.removeprefix("v"):
+                    raise ValueError(f"核心版本 {version} 与 Release tag {tag} 不一致")
             except Exception as exc:
                 errors.append(f"{url}: {exc}")
                 logger.warning("核心下载来源失败: %s: %s", url, exc)
@@ -223,35 +251,58 @@ def _ensure_executable(binary_path: Path) -> None:
 
 
 class CoreManager:
-    def __init__(self, plugin_root: Path, config=None):
+    def __init__(self, plugin_root: Path, config=None, *, data_dir: Path | None = None):
         self.plugin_root = plugin_root
+        self.data_dir = data_dir if data_dir is not None else plugin_root
         self.config = config
         self._download_lock = threading.Lock()
         self._execution_lock = CoreAccess()
         self.version: str | None = None
 
+    def _installed_path(self) -> Path:
+        try:
+            return _detect_binary_path(self.data_dir)
+        except Exception:
+            if self.data_dir == self.plugin_root:
+                raise
+            # 兼容旧安装；后续下载写入插件数据目录，不改动旧文件及其缓存。
+            return _detect_binary_path(self.plugin_root)
+
     def has_core(self) -> bool:
         try:
-            _detect_binary_path(self.plugin_root)
+            self._installed_path()
         except Exception:
             return False
         return True
 
     def ensure(self, *, force: bool = False) -> Path:
-        """Serialize downloads; keep the installed core usable until atomic replacement."""
+        """force 表示检查最新 tag；相同版本保持文件和修改时间不变。"""
+        # 普通渲染必须在下载锁外取得旧核心，否则会等待整段网络下载。
+        if not force and self.has_core():
+            return self._installed_path()
         with self._download_lock:
             if not force and self.has_core():
-                return _detect_binary_path(self.plugin_root)
+                return self._installed_path()
             names = _binary_names()
-            # Replace a legacy-named installation in place as well.
-            target = (
-                _detect_binary_path(self.plugin_root)
-                if self.has_core() else self.plugin_root / "bin" / names[0]
-            )
             repository = str((self.config or {}).get(
                 "core_repository", "2710165659/osu-beatmap-preview"
             ))
-            self.version = download_core(repository, names[0], target, self._execution_lock)
+            tag = latest_release_tag(repository)
+            if self.has_core():
+                installed = self._installed_path()
+                _ensure_executable(installed)
+                try:
+                    self.version = _core_version(installed)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    logger.warning("现有核心无法读取版本，将重新下载", exc_info=True)
+                else:
+                    if self.version == "v" + tag.removeprefix("v"):
+                        logger.info("核心已是最新版本 %s，跳过下载", self.version)
+                        return installed
+            target = self.data_dir / "bin" / names[0]
+            self.version = download_core(
+                repository, names[0], target, self._execution_lock, tag=tag
+            )
             return target
 
     @property

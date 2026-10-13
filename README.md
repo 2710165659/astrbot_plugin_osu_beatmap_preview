@@ -68,35 +68,40 @@ https://github.com/2710165659/astrbot_plugin_osu_beatmap_preview
 
 插件不绑定具体核心版本，插件版本与核心版本独立更新，仓库和安装包不包含二进制核心。默认从 [osu-beatmap-preview Releases](https://github.com/2710165659/osu-beatmap-preview/releases/latest) 获取最新 CLI；也可以手动放置兼容相同命令行参数、配置和 JSON 输出协议的核心。使用其他 GitHub 仓库时，可在插件配置中修改 `core_repository`（产物须采用下表中的命名）。
 
-- 插件安装、启动加载或重载时通过 AstrBot 的 `initialize()` 钩子后台更新最新核心，不阻塞插件加载。成功后在 AstrBot 日志打印核心版本及耗时（秒），失败记录日志并保留旧核心。
+- 插件安装、启动加载或重载时通过 AstrBot 的 `initialize()` 钩子后台检查最新 Release tag，不阻塞插件加载。与已安装核心的 `--version` 相同时跳过下载，保留文件修改时间和预览缓存；版本不同时下载对应 tag 的核心。成功后日志打印核心版本及耗时（秒），失败记录日志并保留旧核心。
 - 首次发送 `/v`、`/vp`、`/vg`、`/vgc`、`/vgcl`、`/vv` 或 `/预览`，缺核心时会提示「核心正在下载」，并在后台只下载当前平台的文件。完成后不主动通知，请稍后重新发送渲染命令。
-- 已有核心时普通命令跳过下载；发送 `/v update` 可手动下载并替换为最新核心，返回更新结果。
+- 已有核心时普通命令跳过下载；发送 `/v update` 可手动检查并更新核心，返回当前版本。配置 `core_update_users` 可限制此命令的用户 ID，默认空列表允许所有人使用；普通预览不受影响。
+- 核心通过 AstrBot 的 `StarTools.get_data_dir()` 保存至 `data/plugin_data/astrbot_plugin_osu_beatmap_preview/bin/`，避免随插件重装丢失。仍可读取旧的插件根目录 `bin/`，后续下载统一写入新目录。
 - 优先访问 GitHub 官方，失败后重试并依次尝试 ghfast.top、gh-proxy.com、ghproxy.net 镜像。镜像可用性会变化，全部失败时可稍后重试或手动安装。
-- 新文件先下载至同目录临时文件，检查文件完整性、可执行格式与架构后才替换旧核心。下载过程中旧核心不变；若有渲染正在运行，替换会等待其结束。失败会保留旧核心并清理临时文件。
+- 新文件先下载至同目录临时文件，检查文件完整性、可执行格式、架构与版本 tag 后才替换旧核心。下载和等待替换期间，新请求仍可使用旧核心；仅原子替换时短暂独占访问。失败会保留旧核心并清理临时文件。
 
 ### 手动下载和放置核心
 
 1. 在 [Release 页面](https://github.com/2710165659/osu-beatmap-preview/releases) 的 Assets 中下载当前 **AstrBot 运行环境**对应的 CLI，Docker 部署请按容器平台选择。无需下载其他平台；若下载的是压缩包，先解压出可执行文件。
-2. 在插件根目录创建 `bin/`，将文件放入其中，保持以下文件名：
+2. 在 `AstrBot/data/plugin_data/astrbot_plugin_osu_beatmap_preview/` 下创建 `bin/`，将文件放入其中，保持以下文件名：
 
-| 运行平台 | 相对插件根目录的路径 |
+| 运行平台 | 相对插件数据目录的路径 |
 | --- | --- |
 | Windows x86_64 / amd64 | `bin/osu-beatmap-preview-windows-amd64-cli.exe` |
 | Linux x86_64 / amd64 | `bin/osu-beatmap-preview-linux-amd64-cli` |
 | macOS Intel | `bin/osu-beatmap-preview-macos-amd64-cli` |
 | macOS Apple Silicon | `bin/osu-beatmap-preview-macos-arm64-cli` |
 
-例如 Windows 插件路径为 `AstrBot/data/plugins/astrbot_plugin_osu_beatmap_preview/`，则核心放到该路径下的 `bin/osu-beatmap-preview-windows-amd64-cli.exe`。
+例如 Windows 核心路径为 `AstrBot/data/plugin_data/astrbot_plugin_osu_beatmap_preview/bin/osu-beatmap-preview-windows-amd64-cli.exe`。AstrBot 根目录以运行环境为准，并支持 `ASTRBOT_ROOT`；插件不自行假定根目录。旧插件目录下的 `bin/` 仍兼容，但新数据目录优先。
 
 3. Linux/macOS 请赋予执行权限，例如 Linux：
 
 ```bash
-chmod +x AstrBot/data/plugins/astrbot_plugin_osu_beatmap_preview/bin/osu-beatmap-preview-linux-amd64-cli
+chmod +x AstrBot/data/plugin_data/astrbot_plugin_osu_beatmap_preview/bin/osu-beatmap-preview-linux-amd64-cli
 ```
 
 4. 发送渲染命令即可使用。也兼容去掉 `-cli` 的旧文件名，但优先使用新文件名。当前上游未提供 Linux ARM、Windows ARM 或 32 位产物，插件不会下载错误架构的核心。
 
-仍可在本机运行 `python update_core.py`；Windows 的 `update_core.bat` 调用同一套下载逻辑，只更新当前平台。
+仍可从 AstrBot 根目录运行 `python data/plugins/astrbot_plugin_osu_beatmap_preview/update_core.py`，或设置 `ASTRBOT_ROOT` 后运行脚本；Windows 的 `update_core.bat` 调用同一套版本检查和下载逻辑，只更新当前平台。
+
+### 预览缓存
+
+核心要求预览产物的修改时间不早于核心可执行文件与谱面文件，因此重复下载同一版本核心也会使旧预览失效。本插件在 tag 相同时跳过下载，避免无故重渲染。真正更新核心后，同一请求第一次重渲染是正常行为；后续相同参数和配置可复用缓存。核心默认输出和谱面缓存仍由核心配置决定，`--no-cache` 会显式禁用复用。
 
 ### 参数处理
 

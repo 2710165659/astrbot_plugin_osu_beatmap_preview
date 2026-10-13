@@ -11,3 +11,4 @@ target/
 .codegraph/
 # Downloaded platform cores stay local.
 bin/
+data/

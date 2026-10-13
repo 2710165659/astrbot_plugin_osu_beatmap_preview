@@ -11,7 +11,7 @@ from pathlib import Path
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
 
 # AstrBot 会直接加载插件根目录下的 main.py。
 # 这里主动把插件根目录放进 sys.path，确保 service/ 目录的导入行为稳定。
@@ -43,9 +43,11 @@ class BeatmapPreviewPlugin(Star):
 
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
+        self.config = config
         self.preview_service = BeatmapPreviewService(
             plugin_root=PLUGIN_ROOT,
             config=config,
+            data_dir=StarTools.get_data_dir("astrbot_plugin_osu_beatmap_preview"),
         )
         self.max_image_queue_length = max(
             1, int(config.get("max_image_queue_length", 10))
@@ -69,7 +71,7 @@ class BeatmapPreviewPlugin(Star):
         start = time.monotonic()
         path = await asyncio.to_thread(self.preview_service.ensure_core, force=force)
         version = self.preview_service.core.version
-        logger.info(f"核心更新成功：{version}，耗时 {time.monotonic() - start:.1f} s")
+        logger.info(f"核心检查/下载完成：{version}，耗时 {time.monotonic() - start:.1f} s")
         return path
 
     def _start_core_download(self, *, force: bool = False) -> asyncio.Task:
@@ -95,15 +97,21 @@ class BeatmapPreviewPlugin(Star):
             return
 
         if matched.group("command").lower() == "v" and matched.group("tail").strip().lower() == "update":
+            allowed_users = self.config.get("core_update_users", [])
+            if allowed_users and str(event.get_sender_id()) not in {
+                str(user).strip() for user in allowed_users
+            }:
+                yield self._reply_text(event, "你没有权限更新核心，请联系配置中允许的人员")
+                return
             task = self._start_core_download(force=True)
-            yield self._reply_text(event, "核心正在更新，完成前仍可使用旧核心" if self.preview_service.has_core() else "核心正在下载")
+            yield self._reply_text(event, "正在检查核心版本，完成前仍可使用旧核心" if self.preview_service.has_core() else "核心正在下载")
             try:
                 await asyncio.shield(task)
             except Exception as exc:
                 yield self._reply_text(event, f"核心更新失败：{exc}")
             else:
                 version = self.preview_service.core.version
-                yield self._reply_text(event, f"核心已更新至 {version}")
+                yield self._reply_text(event, f"核心检查完成，当前版本 {version}")
             return
 
         core_missing = not self.preview_service.has_core()

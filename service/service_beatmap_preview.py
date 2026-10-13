@@ -14,8 +14,11 @@ PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
 class BeatmapPreviewService:
     """通过调用 Rust 二进制文件生成 osu! 谱面预览图和视频。"""
 
-    def __init__(self, plugin_root: Path, config: Mapping[str, Any] | None = None) -> None:
-        self.core = CoreManager(plugin_root, config)
+    def __init__(
+        self, plugin_root: Path, config: Mapping[str, Any] | None = None,
+        *, data_dir: Path | None = None,
+    ) -> None:
+        self.core = CoreManager(plugin_root, config, data_dir=data_dir)
         self.config_loader = CoreConfig(config)
 
     def has_core(self) -> bool:
