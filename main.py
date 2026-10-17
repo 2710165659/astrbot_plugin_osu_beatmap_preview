@@ -4,7 +4,6 @@ import asyncio
 import base64
 import os
 import re
-import sys
 import time
 from pathlib import Path
 
@@ -13,14 +12,14 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
-# AstrBot 会直接加载插件根目录下的 main.py。
-# 这里主动把插件根目录放进 sys.path，确保 service/ 目录的导入行为稳定。
 PLUGIN_ROOT = Path(__file__).resolve().parent
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
 
-from service.service_beatmap_preview import BeatmapPreviewService
-from service.preview_request import parse_request
+# Keep dependencies under the plugin package so AstrBot clears them on reload.
+from .service.service_beatmap_preview import (
+    PYTHON_RENDER_TIMEOUT_SECONDS,
+    BeatmapPreviewService,
+)
+from .service.preview_request import CUSTOM_REQUEST_RE, parse_custom_request, parse_request
 
 V_REQUEST_RE = re.compile(
     r"^\s*/(?P<command>预览|vgcl|vgc|vv|vp|vg|v)(?P<tail>.*)\s*$",
@@ -29,14 +28,12 @@ V_REQUEST_RE = re.compile(
 
 HELP_IMG = PLUGIN_ROOT / "help.png"
 
-PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
-
 
 @register(
     "astrbot_plugin_osu_beatmap_preview",
     "xuan_yuan",
     "Generate osu! beatmap preview images and videos from beatmap id via osu-beatmap-preview Rust core.",
-    "0.5.0",
+    "0.5.2",
 )
 class BeatmapPreviewPlugin(Star):
     """AstrBot 插件入口"""
@@ -89,14 +86,15 @@ class BeatmapPreviewPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def preview_beatmap(self, event: AstrMessageEvent):
-        """统一处理 /v、/vp、/vg、/vgc、/vgcl、/vv 指令"""
+        """统一处理 /v、/vp、/vg、/vgc、/vgcl、/vv、/v-custom 指令"""
 
         raw_text = event.message_obj.message_str
-        matched = V_REQUEST_RE.match(raw_text)
+        custom_matched = CUSTOM_REQUEST_RE.match(raw_text)
+        matched = custom_matched or V_REQUEST_RE.match(raw_text)
         if not matched:
             return
 
-        if matched.group("command").lower() == "v" and matched.group("tail").strip().lower() == "update":
+        if not custom_matched and matched.group("command").lower() == "v" and matched.group("tail").strip().lower() == "update":
             allowed_users = self.config.get("core_update_users", [])
             if allowed_users and str(event.get_sender_id()) not in {
                 str(user).strip() for user in allowed_users
@@ -119,15 +117,18 @@ class BeatmapPreviewPlugin(Star):
             self._start_core_download()
 
         try:
-            request = parse_request(
-                command=matched.group("command"),
-                raw_tail=matched.group("tail"),
-            )
+            if custom_matched:
+                request = parse_custom_request(custom_matched.group("tail") or "")
+            else:
+                request = parse_request(
+                    command=matched.group("command"),
+                    raw_tail=matched.group("tail"),
+                )
         except ValueError as exc:
             yield self._reply_text(event, str(exc) + ("\n核心正在下载" if core_missing else ""))
             return
 
-        if request.bid is None:
+        if request.bid is None and request.cli_args is None:
             yield event.chain_result([
                 Comp.Reply(id=event.message_obj.message_id),
                 Comp.Image.fromFileSystem(str(HELP_IMG)),
@@ -140,6 +141,7 @@ class BeatmapPreviewPlugin(Star):
             return
 
         is_video = request.fmt == "mp4"
+        request_label = "v-custom" if request.cli_args is not None else request.bid
         queue_position = None
         if is_video:
             async with self._video_queue_lock:
@@ -174,8 +176,14 @@ class BeatmapPreviewPlugin(Star):
             timeout_seconds = PYTHON_RENDER_TIMEOUT_SECONDS
             try:
                 async with render_semaphore:
-                    result = await asyncio.wait_for(
-                        asyncio.to_thread(
+                    if request.cli_args is not None:
+                        render_task = asyncio.to_thread(
+                            self.preview_service.generate_custom,
+                            request.cli_args,
+                            timeout=timeout_seconds,
+                        )
+                    else:
+                        render_task = asyncio.to_thread(
                             self.preview_service.generate_from_bid,
                             request.bid,
                             fmt=request.fmt,
@@ -189,30 +197,36 @@ class BeatmapPreviewPlugin(Star):
                             taiko_gap=request.taiko_gap,
                             gif_duration_ms=request.gif_duration_ms,
                             timeout=timeout_seconds,
-                        ),
+                        )
+                    result = await asyncio.wait_for(
+                        render_task,
                         timeout=timeout_seconds,
                     )
                 preview_path = result["preview-img"]
                 if not preview_path or not Path(preview_path).exists():
                     raise FileNotFoundError("生成的预览文件不存在")
             except asyncio.TimeoutError:
-                logger.warning(f"[{request.bid}] 生成失败：超时（>{timeout_seconds}s）")
+                logger.warning(f"[{request_label}] 生成失败：超时（>{timeout_seconds}s）")
                 yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
                 return
             except TimeoutError:
-                logger.warning(f"[{request.bid}] 生成失败：超时（>{timeout_seconds}s）")
+                logger.warning(f"[{request_label}] 生成失败：超时（>{timeout_seconds}s）")
                 yield self._reply_text(event, "谱面预览生成超时，请稍后再试")
                 return
             except Exception as exc:
-                logger.error(f"[{request.bid}] 生成失败：{exc}", exc_info=True)
+                logger.error(f"[{request_label}] 生成失败：{exc}", exc_info=True)
                 yield self._reply_text(event, "谱面预览生成失败：" + str(exc))
                 return
 
             elapsed = time.monotonic() - t0
             size_kb = os.path.getsize(preview_path) / 1024
-            logger.info(f"[{request.bid}] 生成成功，耗时 {elapsed:.1f} s，文件：{Path(preview_path).name}（{size_kb:.1f} KB）")
+            logger.info(f"[{request_label}] 生成成功，耗时 {elapsed:.1f} s，文件：{Path(preview_path).name}（{size_kb:.1f} KB）")
 
-            if is_video:
+            send_as_video = (
+                Path(preview_path).suffix.lower() == ".mp4"
+                if request.cli_args is not None else is_video
+            )
+            if send_as_video:
                 video_data = await asyncio.to_thread(
                     self._encode_video_base64,
                     preview_path,
@@ -221,7 +235,7 @@ class BeatmapPreviewPlugin(Star):
             else:
                 preview_component = Comp.Image.fromFileSystem(preview_path)
 
-            if is_video:
+            if send_as_video:
                 yield event.chain_result([preview_component])
             else:
                 yield event.chain_result([

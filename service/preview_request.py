@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
+
+CUSTOM_REQUEST_RE = re.compile(
+    r"^\s*/v-custom(?:\s(?P<tail>[\s\S]*))?\Z", re.IGNORECASE,
+)
 
 COMMAND_TO_FMT = {
     "v": None, "预览": None, "vp": "png",
@@ -29,6 +34,22 @@ class PreviewRequest:
     full_video: bool = False
     config_profile: str = "default"
     gif_duration_ms: int | float | None = None
+    cli_args: tuple[str, ...] | None = None
+
+
+def parse_custom_request(raw_tail: str) -> PreviewRequest:
+    # Use the same quoting rules on every host; never interpret shell commands.
+    # Only inspect --fmt for queue selection; leave all arguments untouched.
+    args = tuple(shlex.split(raw_tail, comments=False, posix=True))
+    fmt = None
+    for index, arg in enumerate(args):
+        if arg == "--":
+            break
+        if arg.startswith("--fmt="):
+            fmt = arg.partition("=")[2]
+        elif arg == "--fmt" and index + 1 < len(args):
+            fmt = args[index + 1]
+    return PreviewRequest(fmt=fmt, full_video=fmt == "mp4", cli_args=args)
 
 
 def parse_request(command: str, raw_tail: str) -> PreviewRequest:

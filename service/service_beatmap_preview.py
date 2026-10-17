@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from service.core_config import CoreConfig
-from service.core_download import CoreManager
+from .core_config import CoreConfig
+from .core_download import CoreManager
 
-PYTHON_RENDER_TIMEOUT_SECONDS = 10 * 60
+PYTHON_RENDER_TIMEOUT_SECONDS = 60 * 60
+DEFAULT_CORE_ENV = "OSU_CLIENT_ID=''\nOSU_CLIENT_SECRET=''\n"
 
 
 class BeatmapPreviewService:
@@ -19,6 +21,7 @@ class BeatmapPreviewService:
         *, data_dir: Path | None = None,
     ) -> None:
         self.core = CoreManager(plugin_root, config, data_dir=data_dir)
+        self.config = config
         self.config_loader = CoreConfig(config)
 
     def has_core(self) -> bool:
@@ -36,7 +39,14 @@ class BeatmapPreviewService:
     ) -> dict[str, Any]:
         return self._render(self.build_args(bid, **options), timeout)
 
+    def generate_custom(
+        self, args: Sequence[str], *, timeout: int = PYTHON_RENDER_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        return self._render([str(self.binary_path), *args], timeout)
+
     def _render(self, args: list[str], timeout: int) -> dict[str, Any]:
+        # Read immediately before execution, without changing AstrBot's environment.
+        env = self._build_core_env()
         try:
             with self.core._execution_lock.render():
                 result = subprocess.run(
@@ -46,6 +56,7 @@ class BeatmapPreviewService:
                     encoding="utf-8",
                     errors="replace",
                     timeout=timeout,
+                    env=env,
                 )
         except subprocess.TimeoutExpired:
             raise TimeoutError("预览生成超时，请稍后再试")
@@ -57,6 +68,26 @@ class BeatmapPreviewService:
         if preview_img:
             payload["preview-img"] = str(Path(preview_img).resolve())
         return payload
+
+    def _build_core_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        contents = (self.config or {}).get("core_env", DEFAULT_CORE_ENV)
+        if not isinstance(contents, str):
+            raise ValueError("核心环境变量配置必须为文本，每行一个 KEY=VALUE")
+        for line_number, line in enumerate(contents.splitlines(), 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, separator, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if not separator or not key:
+                raise ValueError(f"核心环境变量配置第 {line_number} 行应为 KEY=VALUE")
+            if value.startswith(("'", '"')):
+                if len(value) < 2 or value[-1] != value[0]:
+                    raise ValueError(f"核心环境变量配置第 {line_number} 行引号未闭合")
+                value = value[1:-1]
+            env[key] = value
+        return env
 
     def build_args(
         self,

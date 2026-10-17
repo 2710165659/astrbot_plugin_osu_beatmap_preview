@@ -5,6 +5,14 @@
     "hint": "使用 owner/repo 格式，默认下载最新 Release 的当前平台 CLI。替代核心需要兼容文件名、CLI 参数及 JSON 协议。",
     "default": "2710165659/osu-beatmap-preview"
   },
+  "core_env": {
+    "description": "核心环境变量",
+    "type": "text",
+    "editor_mode": true,
+    "editor_language": "ini",
+    "hint": "直接填写环境变量，每行一个 KEY=VALUE，支持单引号、双引号和整行 # 注释。例如在默认两项中填写 osu! 客户端 ID 和密钥。保存后下次调用核心即生效。填写的变量覆盖同名进程环境变量，空值也会覆盖；清空整个配置时仅继承 AstrBot 环境。",
+    "default": "OSU_CLIENT_ID=''\nOSU_CLIENT_SECRET=''"
+  },
   "core_update_users": {
     "description": "允许更新核心的用户 ID",
     "type": "list",
